@@ -27,9 +27,14 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
   const form = new FormData();
   form.append('tune[title]', title);
   form.append('tune[name]', name);
-  form.append('tune[base_tune_id]', BASE_TUNE_ID);
-  form.append('tune[model_type]', 'lora');
-  if (branch) form.append('tune[branch]', branch); // 'fast' = mock gratuito
+  if (branch === 'fast') {
+    // Modalità mock: solo branch=fast, niente base_tune_id/model_type (andrebbero in conflitto)
+    form.append('tune[branch]', 'fast');
+  } else {
+    form.append('tune[base_tune_id]', BASE_TUNE_ID);
+    form.append('tune[model_type]', 'lora');
+    if (branch) form.append('tune[branch]', branch);
+  }
   if (callbackTune) form.append('tune[callback]', callbackTune);
 
   images.forEach((f) => {

@@ -11,6 +11,9 @@ const pay = require('./payments');
 const app = express();
 const PUBLIC_URL = process.env.PUBLIC_BASE_URL || '';
 const TEST_MODE = process.env.ASTRIA_TEST_MODE === '1'; // branch=fast, generazione gratuita
+// Permette di avviare un ordine senza pagamento (per provare la qualità reale).
+// Attivo automaticamente in TEST_MODE, oppure forzato con ALLOW_DEV_PAY=1.
+const ALLOW_DEV_PAY = TEST_MODE || process.env.ALLOW_DEV_PAY === '1';
 
 // --- Storage su file (niente DB esterno in fase di validazione) ---
 const DATA_DIR = path.join(__dirname, 'data');
@@ -88,6 +91,7 @@ app.post('/api/orders', upload.array('photos', 15), (req, res) => {
       amount: (pay.priceCents(pkg) / 100).toFixed(2),
       methods: { stripe: pay.stripeEnabled(), paypal: pay.paypalEnabled() },
       testMode: TEST_MODE,
+      devPay: ALLOW_DEV_PAY,
     });
   } catch (e) {
     console.error('Errore /api/orders:', e.message);
@@ -213,12 +217,12 @@ app.post('/api/orders/:id/regenerate', async (req, res) => {
 
 // Solo in TEST_MODE: avvia la generazione senza pagamento reale (per provare il flusso)
 app.post('/api/orders/:id/dev-pay', async (req, res) => {
-  if (!TEST_MODE) return res.status(403).json({ error: 'Disponibile solo con ASTRIA_TEST_MODE=1' });
+  if (!ALLOW_DEV_PAY) return res.status(403).json({ error: 'Avvio senza pagamento non abilitato.' });
   try {
     await markPaidAndStart(req.params.id, 'dev');
     res.json({ ok: true });
   } catch (e) {
-    console.error('dev-pay:', e.response?.data || e.message);
+    console.error('dev-pay ERRORE → status:', e.response?.status, '| body:', JSON.stringify(e.response?.data), '| msg:', e.message);
     res.status(500).json({ error: 'Errore avvio generazione.' });
   }
 });
