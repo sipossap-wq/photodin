@@ -3,122 +3,156 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>photodin — Test ordine</title>
+<title>Crea le tue foto — photodin</title>
 <style>
-  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:620px;margin:40px auto;padding:0 20px;color:#16202e}
-  h1{color:#0f2a4a}
-  label{display:block;margin:16px 0 6px;font-weight:600;font-size:14px}
-  input,select{width:100%;padding:11px 12px;border:1px solid #dbe3ee;border-radius:10px;font-size:15px}
-  button{margin-top:14px;border:none;padding:13px 22px;border-radius:999px;font-size:16px;font-weight:600;cursor:pointer}
-  .b-primary{background:#2f7df6;color:#fff}
+  :root{--blu:#0f2a4a;--accent:#2f7df6;--accent-2:#19c0a3;--ink:#16202e;--muted:#5b6b80;--soft:#f4f7fb;--line:#e2e9f2}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--soft);line-height:1.6}
+  .top{background:#fff;border-bottom:1px solid var(--line)}
+  .top .in{max-width:760px;margin:0 auto;padding:16px 20px;display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:var(--blu)}
+  .dot{width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center}
+  .dot svg{width:17px;height:17px;fill:#fff}
+  .wrap{max-width:760px;margin:0 auto;padding:30px 20px 60px}
+  h1{color:var(--blu);font-size:28px;margin-bottom:6px}
+  .sub{color:var(--muted);margin-bottom:26px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px;margin-bottom:18px}
+  label{display:block;font-weight:600;font-size:14px;margin:14px 0 7px;color:var(--blu)}
+  input,select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:10px;font-size:15px;outline:none}
+  input:focus,select:focus{border-color:var(--accent)}
+  .plans{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
+  .plan{border:2px solid var(--line);border-radius:12px;padding:16px;cursor:pointer;transition:.15s}
+  .plan.sel{border-color:var(--accent);background:#f5f9ff}
+  .plan .nm{font-weight:700;color:var(--blu)}
+  .plan .pr{font-size:22px;font-weight:800;color:var(--blu);margin:4px 0}
+  .plan .ds{font-size:12.5px;color:var(--muted)}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;color:var(--muted);font-size:14px}
+  .hint{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:16px;padding:14px 24px;border-radius:999px;cursor:pointer;border:none;width:100%}
+  .b-primary{background:var(--accent);color:#fff}
   .b-paypal{background:#ffc439;color:#142c8e}
-  button:disabled{opacity:.5}
-  .box{background:#f4f7fb;border:1px solid #e2e9f2;border-radius:12px;padding:16px;margin-top:24px;font-size:14px;white-space:pre-wrap}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:16px}
+  .b-dev{background:var(--accent-2);color:#fff}
+  .btn+.btn{margin-top:10px}
+  .box{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:16px;font-size:14px;white-space:pre-wrap;margin-top:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:16px}
   .grid img{width:100%;border-radius:8px}
-  small{color:#5b6b80}
-  #pay{display:none;margin-top:18px}
-  #pay button{width:100%}
+  #pay{display:none}
+  .muted{color:var(--muted);font-size:13px}
 </style>
 </head>
 <body>
-  <h1>photodin · test ordine</h1>
-  <p><small>Pagina interna. 1) crea l'ordine con le foto, 2) paga, 3) la generazione parte da sola.</small></p>
+  <div class="top"><div class="in"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>photodin</div></div>
 
-  <form id="f">
-    <label>Email cliente</label>
-    <input type="email" name="email" required placeholder="cliente@email.it">
+  <div class="wrap">
+    <h1>Crea le tue foto professionali</h1>
+    <p class="sub">Carica i tuoi scatti, scegli il pacchetto e ricevi i tuoi ritratti in circa un'ora.</p>
 
-    <label>Soggetto</label>
-    <select name="subjectClass">
-      <option value="man">Uomo (man)</option>
-      <option value="woman">Donna (woman)</option>
-      <option value="person">Persona (person)</option>
-    </select>
+    <form id="f">
+      <div class="card">
+        <label>1 · Scegli il pacchetto</label>
+        <div class="plans">
+          <div class="plan" data-pkg="base">
+            <div class="nm">Base</div>
+            <div class="pr">€19,90</div>
+            <div class="ds">40 foto professionali</div>
+          </div>
+          <div class="plan" data-pkg="pro">
+            <div class="nm">Pro / Agenzia</div>
+            <div class="pr">€34,90</div>
+            <div class="ds">60 foto, più stili business</div>
+          </div>
+        </div>
 
-    <label>Pacchetto</label>
-    <select name="package">
-      <option value="base">Base — 40 foto (€19,90)</option>
-      <option value="pro">Pro — 60 foto (€34,90)</option>
-    </select>
+        <label>2 · Chi è il soggetto?</label>
+        <select name="subjectClass">
+          <option value="man">Uomo</option>
+          <option value="woman">Donna</option>
+          <option value="person">Preferisco non specificare</option>
+        </select>
 
-    <label>Foto (min 4, consigliate 6–10)</label>
-    <input type="file" name="photos" accept="image/*" multiple required>
+        <label>3 · La tua email (per inviarti le foto)</label>
+        <input type="email" name="email" required placeholder="tu@email.it">
 
-    <button type="submit" class="b-primary">1 · Crea ordine</button>
-  </form>
+        <label>4 · Carica i tuoi selfie</label>
+        <div class="drop">
+          <input type="file" name="photos" accept="image/*" multiple required style="border:none;padding:0">
+          <div class="hint">6–10 foto della stessa persona · viso ben visibile · luci e angolazioni diverse · niente occhiali da sole o altre persone</div>
+        </div>
+      </div>
 
-  <div id="pay">
-    <p><strong>2 · Paga per avviare la generazione</strong></p>
-    <button id="payStripe" class="b-primary">Paga con carta (Stripe)</button>
-    <button id="payPaypal" class="b-paypal">Paga con PayPal</button>
-    <button id="payDev" style="display:none;background:#19c0a3;color:#fff">▶ Avvia senza pagare (modalità test)</button>
+      <button type="submit" class="btn b-primary">Continua al pagamento</button>
+    </form>
+
+    <div id="pay" class="card">
+      <p style="font-weight:700;color:var(--blu);margin-bottom:4px">Quasi fatto!</p>
+      <p class="muted" style="margin-bottom:14px">Completa il pagamento per avviare la creazione delle tue foto.</p>
+      <button id="payStripe" class="btn b-primary">Paga con carta</button>
+      <button id="payPaypal" class="btn b-paypal">Paga con PayPal</button>
+      <button id="payDev" class="btn b-dev" style="display:none">▶ Avvia (modalità prova)</button>
+    </div>
+
+    <div id="out" class="box" style="display:none"></div>
+    <div id="imgs" class="grid"></div>
   </div>
 
-  <div id="out" class="box" style="display:none"></div>
-  <div id="imgs" class="grid"></div>
-
 <script>
-  const f = document.getElementById('f');
-  const out = document.getElementById('out');
-  const imgs = document.getElementById('imgs');
-  const payBox = document.getElementById('pay');
-  let orderId = null, timer = null;
+  const f=document.getElementById('f'),out=document.getElementById('out'),imgs=document.getElementById('imgs'),payBox=document.getElementById('pay');
+  let orderId=null,timer=null,pkg='base';
 
-  // Se torniamo dal pagamento (success_url grazie.html gestisce; qui solo polling se ?order=)
-  const qs = new URLSearchParams(location.search);
-  if (qs.get('order')) { orderId = qs.get('order'); show(); poll(orderId); }
-  if (qs.get('canceled')) msg('Pagamento annullato.');
-  if (qs.get('error')) msg('Errore nel pagamento: ' + qs.get('error'));
+  // pacchetto: da URL (?package=pro) o default base
+  const qs=new URLSearchParams(location.search);
+  if(qs.get('package')==='pro')pkg='pro';
+  function paintPlans(){document.querySelectorAll('.plan').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
+  document.querySelectorAll('.plan').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
+  paintPlans();
 
-  f.addEventListener('submit', async (e) => {
+  if(qs.get('order')){orderId=qs.get('order');show();poll(orderId);}
+  if(qs.get('canceled'))msg('Pagamento annullato. Puoi riprovare quando vuoi.');
+
+  f.addEventListener('submit',async e=>{
     e.preventDefault();
-    msg('Creazione ordine…');
-    const fd = new FormData(f);
-    try {
-      const r = await fetch('/api/orders', { method: 'POST', body: fd });
-      const data = await r.json();
-      if (!r.ok) return msg('Errore: ' + (data.error || r.status));
-      orderId = data.orderId;
-      msg('Ordine ' + orderId + ' creato (€' + data.amount + ').\nScegli come pagare.');
-      payBox.style.display = 'block';
-      document.getElementById('payStripe').style.display = data.methods.stripe ? 'block' : 'none';
-      document.getElementById('payPaypal').style.display = data.methods.paypal ? 'block' : 'none';
-      document.getElementById('payDev').style.display = data.testMode ? 'block' : 'none';
-    } catch (err) { msg('Errore di rete: ' + err.message); }
+    msg('Creazione ordine in corso…');
+    const fd=new FormData(f);fd.set('package',pkg);
+    try{
+      const r=await fetch('/api/orders',{method:'POST',body:fd});
+      const d=await r.json();
+      if(!r.ok){msg('Ops: '+(d.error||r.status));return;}
+      orderId=d.orderId;
+      msg('Ordine creato · €'+d.amount+'. Scegli come pagare qui sopra.');
+      payBox.style.display='block';
+      document.getElementById('payStripe').style.display=d.methods.stripe?'flex':'none';
+      document.getElementById('payPaypal').style.display=d.methods.paypal?'flex':'none';
+      document.getElementById('payDev').style.display=d.devPay?'flex':'none';
+      payBox.scrollIntoView({behavior:'smooth'});
+    }catch(err){msg('Errore di rete: '+err.message+'. Riprova tra un attimo.');}
   });
 
-  document.getElementById('payStripe').onclick = () => goPay('stripe');
-  document.getElementById('payPaypal').onclick = () => goPay('paypal');
-  document.getElementById('payDev').onclick = async () => {
-    msg('Avvio generazione (test)…');
-    const r = await fetch('/api/orders/' + orderId + '/dev-pay', { method: 'POST' });
-    const data = await r.json();
-    if (data.ok) { payBox.style.display = 'none'; poll(orderId); }
-    else msg('Errore: ' + (data.error || 'avvio fallito'));
+  document.getElementById('payStripe').onclick=()=>goPay('stripe');
+  document.getElementById('payPaypal').onclick=()=>goPay('paypal');
+  document.getElementById('payDev').onclick=async()=>{
+    msg('Avvio creazione foto…');
+    const r=await fetch('/api/orders/'+orderId+'/dev-pay',{method:'POST'});
+    const d=await r.json();
+    if(d.ok){payBox.style.display='none';poll(orderId);}else msg('Errore: '+(d.error||'avvio fallito'));
   };
-
-  async function goPay(method) {
-    msg('Apertura pagamento ' + method + '…');
-    const r = await fetch('/api/orders/' + orderId + '/checkout/' + method, { method: 'POST' });
-    const data = await r.json();
-    if (data.url) location.href = data.url;
-    else msg('Errore: ' + (data.error || 'pagamento non disponibile'));
+  async function goPay(m){
+    msg('Apertura pagamento…');
+    const r=await fetch('/api/orders/'+orderId+'/checkout/'+m,{method:'POST'});
+    const d=await r.json();
+    if(d.url)location.href=d.url;else msg('Errore: '+(d.error||'pagamento non disponibile'));
   }
 
-  function show(){ out.style.display='block'; }
-  function msg(t){ show(); out.textContent = t; }
-
-  function poll(id) {
+  function show(){out.style.display='block';}
+  function msg(t){show();out.textContent=t;}
+  function poll(id){
     clearInterval(timer);
-    timer = setInterval(async () => {
-      const r = await fetch('/api/orders/' + id);
-      const o = await r.json();
-      if (o.error) return;
-      msg('Ordine ' + o.id + '\nStato: ' + o.status + '\nProgresso: ' + o.progress + '\nFoto pronte: ' + o.images.length);
-      imgs.innerHTML = o.images.map(u => '<img src="' + u + '">').join('');
-      if (o.status === 'completed') { clearInterval(timer); out.textContent += '\n\n✅ Completato!'; }
-    }, 8000);
+    const labels={paid:'Pagamento ricevuto, preparazione…',training:'Sto imparando il tuo volto…',generating:'Sto creando le tue foto…',completed:'Completato!'};
+    timer=setInterval(async()=>{
+      const r=await fetch('/api/orders/'+id);const o=await r.json();
+      if(o.error)return;
+      msg((labels[o.status]||o.status)+'  ·  foto pronte: '+o.images.length+'  ('+o.progress+')');
+      imgs.innerHTML=o.images.map(u=>'<img src="'+u+'">').join('');
+      if(o.status==='completed'){clearInterval(timer);out.textContent='✅ Le tue foto sono pronte! Clicca col destro per salvarle.';}
+    },8000);
   }
 </script>
 </body>
