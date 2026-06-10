@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grazie — photodin</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:620px;margin:60px auto;padding:0 20px;color:#16202e;text-align:center}
+  h1{color:#0f2a4a}
+  .box{background:#f4f7fb;border:1px solid #e2e9f2;border-radius:12px;padding:18px;margin-top:24px;font-size:14px;white-space:pre-wrap;text-align:left}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:18px}
+  .grid img{width:100%;border-radius:8px}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#19c0a3;margin-right:6px;animation:p 1s infinite}
+  @keyframes p{50%{opacity:.3}}
+</style>
+</head>
+<body>
+  <h1>Grazie! Pagamento ricevuto ✨</h1>
+  <p>Stiamo creando le tue foto. Di solito ci vuole circa un'ora.<br>Puoi lasciare questa pagina aperta: si aggiorna da sola.</p>
+  <div class="box" id="status"><span class="dot"></span>Avvio in corso…</div>
+  <div class="grid" id="imgs"></div>
+
+<script>
+  const id = new URLSearchParams(location.search).get('order');
+  const status = document.getElementById('status');
+  const imgs = document.getElementById('imgs');
+  if (!id) status.textContent = 'Ordine non specificato.';
+  else setInterval(async () => {
+    const r = await fetch('/api/orders/' + id);
+    const o = await r.json();
+    if (o.error) { status.textContent = o.error; return; }
+    const labels = { paid:'Pagato, preparazione…', training:'Addestramento del modello…', generating:'Generazione foto…', completed:'Completato!' };
+    status.innerHTML = (o.status==='completed'?'✅ ':'<span class="dot"></span>') +
+      (labels[o.status] || o.status) + '  ·  foto pronte: ' + o.images.length + ' (' + o.progress + ')';
+    imgs.innerHTML = o.images.map(u => '<img src="' + u + '">').join('');
+  }, 8000);
+</script>
+</body>
+</html>

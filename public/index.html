@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>photodin — Test ordine</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:620px;margin:40px auto;padding:0 20px;color:#16202e}
+  h1{color:#0f2a4a}
+  label{display:block;margin:16px 0 6px;font-weight:600;font-size:14px}
+  input,select{width:100%;padding:11px 12px;border:1px solid #dbe3ee;border-radius:10px;font-size:15px}
+  button{margin-top:14px;border:none;padding:13px 22px;border-radius:999px;font-size:16px;font-weight:600;cursor:pointer}
+  .b-primary{background:#2f7df6;color:#fff}
+  .b-paypal{background:#ffc439;color:#142c8e}
+  button:disabled{opacity:.5}
+  .box{background:#f4f7fb;border:1px solid #e2e9f2;border-radius:12px;padding:16px;margin-top:24px;font-size:14px;white-space:pre-wrap}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:16px}
+  .grid img{width:100%;border-radius:8px}
+  small{color:#5b6b80}
+  #pay{display:none;margin-top:18px}
+  #pay button{width:100%}
+</style>
+</head>
+<body>
+  <h1>photodin · test ordine</h1>
+  <p><small>Pagina interna. 1) crea l'ordine con le foto, 2) paga, 3) la generazione parte da sola.</small></p>
+
+  <form id="f">
+    <label>Email cliente</label>
+    <input type="email" name="email" required placeholder="cliente@email.it">
+
+    <label>Soggetto</label>
+    <select name="subjectClass">
+      <option value="man">Uomo (man)</option>
+      <option value="woman">Donna (woman)</option>
+      <option value="person">Persona (person)</option>
+    </select>
+
+    <label>Pacchetto</label>
+    <select name="package">
+      <option value="base">Base — 40 foto (€19,90)</option>
+      <option value="pro">Pro — 60 foto (€34,90)</option>
+    </select>
+
+    <label>Foto (min 4, consigliate 6–10)</label>
+    <input type="file" name="photos" accept="image/*" multiple required>
+
+    <button type="submit" class="b-primary">1 · Crea ordine</button>
+  </form>
+
+  <div id="pay">
+    <p><strong>2 · Paga per avviare la generazione</strong></p>
+    <button id="payStripe" class="b-primary">Paga con carta (Stripe)</button>
+    <button id="payPaypal" class="b-paypal">Paga con PayPal</button>
+    <button id="payDev" style="display:none;background:#19c0a3;color:#fff">▶ Avvia senza pagare (modalità test)</button>
+  </div>
+
+  <div id="out" class="box" style="display:none"></div>
+  <div id="imgs" class="grid"></div>
+
+<script>
+  const f = document.getElementById('f');
+  const out = document.getElementById('out');
+  const imgs = document.getElementById('imgs');
+  const payBox = document.getElementById('pay');
+  let orderId = null, timer = null;
+
+  // Se torniamo dal pagamento (success_url grazie.html gestisce; qui solo polling se ?order=)
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('order')) { orderId = qs.get('order'); show(); poll(orderId); }
+  if (qs.get('canceled')) msg('Pagamento annullato.');
+  if (qs.get('error')) msg('Errore nel pagamento: ' + qs.get('error'));
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg('Creazione ordine…');
+    const fd = new FormData(f);
+    try {
+      const r = await fetch('/api/orders', { method: 'POST', body: fd });
+      const data = await r.json();
+      if (!r.ok) return msg('Errore: ' + (data.error || r.status));
+      orderId = data.orderId;
+      msg('Ordine ' + orderId + ' creato (€' + data.amount + ').\nScegli come pagare.');
+      payBox.style.display = 'block';
+      document.getElementById('payStripe').style.display = data.methods.stripe ? 'block' : 'none';
+      document.getElementById('payPaypal').style.display = data.methods.paypal ? 'block' : 'none';
+      document.getElementById('payDev').style.display = data.testMode ? 'block' : 'none';
+    } catch (err) { msg('Errore di rete: ' + err.message); }
+  });
+
+  document.getElementById('payStripe').onclick = () => goPay('stripe');
+  document.getElementById('payPaypal').onclick = () => goPay('paypal');
+  document.getElementById('payDev').onclick = async () => {
+    msg('Avvio generazione (test)…');
+    const r = await fetch('/api/orders/' + orderId + '/dev-pay', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) { payBox.style.display = 'none'; poll(orderId); }
+    else msg('Errore: ' + (data.error || 'avvio fallito'));
+  };
+
+  async function goPay(method) {
+    msg('Apertura pagamento ' + method + '…');
+    const r = await fetch('/api/orders/' + orderId + '/checkout/' + method, { method: 'POST' });
+    const data = await r.json();
+    if (data.url) location.href = data.url;
+    else msg('Errore: ' + (data.error || 'pagamento non disponibile'));
+  }
+
+  function show(){ out.style.display='block'; }
+  function msg(t){ show(); out.textContent = t; }
+
+  function poll(id) {
+    clearInterval(timer);
+    timer = setInterval(async () => {
+      const r = await fetch('/api/orders/' + id);
+      const o = await r.json();
+      if (o.error) return;
+      msg('Ordine ' + o.id + '\nStato: ' + o.status + '\nProgresso: ' + o.progress + '\nFoto pronte: ' + o.images.length);
+      imgs.innerHTML = o.images.map(u => '<img src="' + u + '">').join('');
+      if (o.status === 'completed') { clearInterval(timer); out.textContent += '\n\n✅ Completato!'; }
+    }, 8000);
+  }
+</script>
+</body>
+</html>
