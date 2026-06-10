@@ -27,6 +27,7 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
   const form = new FormData();
   form.append('tune[title]', title);
   form.append('tune[name]', name);
+  form.append('tune[token]', 'ohwx'); // parola chiave usata nei prompt (coerente con styles.js)
   if (branch === 'fast') {
     // Modalità mock: solo branch=fast, niente base_tune_id/model_type (andrebbero in conflitto)
     form.append('tune[branch]', 'fast');
