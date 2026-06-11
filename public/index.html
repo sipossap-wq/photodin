@@ -62,21 +62,38 @@
           </div>
         </div>
 
-        <label>2 · Chi è il soggetto?</label>
+        <label>2 · Scegli gli stili</label>
+        <div id="styleGrid" class="plans" style="grid-template-columns:1fr 1fr;gap:10px"></div>
+        <div class="hint" style="margin-top:6px">Seleziona uno o più stili: le foto del pacchetto si distribuiscono tra quelli scelti.</div>
+
+        <label>3 · Chi è il soggetto?</label>
         <select name="subjectClass">
           <option value="man">Uomo</option>
           <option value="woman">Donna</option>
           <option value="person">Preferisco non specificare</option>
         </select>
 
-        <label>3 · La tua email (per inviarti le foto)</label>
+        <label>4 · La tua email (per inviarti le foto)</label>
         <input type="email" name="email" required placeholder="tu@email.it">
 
-        <label>4 · Carica i tuoi selfie</label>
+        <label>5 · Carica i tuoi selfie</label>
         <div class="drop">
           <input type="file" name="photos" accept="image/*" multiple required style="border:none;padding:0">
           <div class="hint">6–10 foto della stessa persona · viso ben visibile · luci e angolazioni diverse · niente occhiali da sole o altre persone</div>
         </div>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-weight:400;color:var(--ink)">
+          <input type="checkbox" name="consent" required style="width:auto;margin-top:4px">
+          <span style="font-size:13.5px;line-height:1.5">Confermo di essere io la persona ritratta nelle foto (o di averne il consenso), che non sono un minore, e accetto la <a href="/privacy.html" target="_blank" style="color:var(--accent)">Privacy Policy</a> e i <a href="/termini.html" target="_blank" style="color:var(--accent)">Termini di servizio</a>.</span>
+        </label>
+      </div>
+
+      <div class="card" id="previewCard">
+        <p style="font-weight:700;color:var(--blu);margin-bottom:4px">✨ Prova gratis, prima di pagare</p>
+        <p class="muted" style="margin-bottom:12px">Genera 1 foto di prova gratuita: paghi solo se ti convince.</p>
+        <button type="button" id="previewBtn" class="btn b-dev">Genera 1 foto gratis</button>
+        <div id="previewOut" class="box" style="display:none"></div>
+        <div id="previewImg" style="margin-top:12px;text-align:center"></div>
       </div>
 
       <button type="submit" class="btn b-primary">Continua al pagamento</button>
@@ -102,8 +119,24 @@
   const qs=new URLSearchParams(location.search);
   if(qs.get('package')==='pro')pkg='pro';
   function paintPlans(){document.querySelectorAll('.plan').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
-  document.querySelectorAll('.plan').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
+  document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
   paintPlans();
+
+  // stili selezionabili
+  let selectedStyles=new Set();
+  fetch('/api/styles').then(r=>r.json()).then(list=>{
+    const g=document.getElementById('styleGrid');
+    g.innerHTML=list.map(s=>'<div class="plan" data-style="'+s.id+'"><div class="nm">'+s.label+'</div><div class="ds">'+s.desc+'</div></div>').join('');
+    list.slice(0,4).forEach(s=>selectedStyles.add(s.id));
+    g.querySelectorAll('[data-style]').forEach(el=>{
+      if(selectedStyles.has(el.dataset.style))el.classList.add('sel');
+      el.onclick=()=>{
+        const id=el.dataset.style;
+        if(selectedStyles.has(id)){selectedStyles.delete(id);el.classList.remove('sel');}
+        else{selectedStyles.add(id);el.classList.add('sel');}
+      };
+    });
+  });
 
   if(qs.get('order')){orderId=qs.get('order');show();poll(orderId);}
   if(qs.get('canceled'))msg('Pagamento annullato. Puoi riprovare quando vuoi.');
@@ -112,6 +145,7 @@
     e.preventDefault();
     msg('Creazione ordine in corso…');
     const fd=new FormData(f);fd.set('package',pkg);
+    selectedStyles.forEach(s=>fd.append('styles',s));
     try{
       const r=await fetch('/api/orders',{method:'POST',body:fd});
       const d=await r.json();
@@ -139,6 +173,35 @@
     const r=await fetch('/api/orders/'+orderId+'/checkout/'+m,{method:'POST'});
     const d=await r.json();
     if(d.url)location.href=d.url;else msg('Errore: '+(d.error||'pagamento non disponibile'));
+  }
+
+  // --- Anteprima gratuita ---
+  document.getElementById('previewBtn').onclick=async()=>{
+    const email=f.email.value.trim(), files=f.photos.files;
+    if(!email){previewMsg('Inserisci prima la tua email qui sopra.');return;}
+    if(!files||files.length<3){previewMsg('Carica almeno 3 foto qui sopra.');return;}
+    previewMsg('Sto generando la tua foto di prova… (qualche secondo)');
+    const fd=new FormData();
+    fd.set('email',email); fd.set('subjectClass',f.subjectClass.value);
+    for(const file of files) fd.append('photos',file);
+    try{
+      const r=await fetch('/api/preview',{method:'POST',body:fd});
+      const d=await r.json();
+      if(!r.ok){previewMsg(d.error||'Errore');return;}
+      pollPreview(d.previewId);
+    }catch(err){previewMsg('Errore di rete: '+err.message);}
+  };
+  function previewMsg(t){const o=document.getElementById('previewOut');o.style.display='block';o.textContent=t;}
+  function pollPreview(id){
+    const t=setInterval(async()=>{
+      const r=await fetch('/api/preview/'+id);const o=await r.json();
+      if(o.error)return;
+      if(o.status==='completed'&&o.image){
+        clearInterval(t);
+        previewMsg('Ecco la tua anteprima! Se ti piace, completa l’ordine qui sotto 👇');
+        document.getElementById('previewImg').innerHTML='<img src="'+o.image+'" style="max-width:260px;border-radius:12px">';
+      }
+    },4000);
   }
 
   function show(){out.style.display='block';}
