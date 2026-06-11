@@ -81,4 +81,45 @@ async function getTune(tuneId) {
   return data;
 }
 
-module.exports = { createTune, createPrompt, getTune, BASE_TUNE_ID };
+/** Cancella un tune su Astria (modello + immagini di training + immagini generate). */
+async function deleteTune(tuneId) {
+  await axios.delete(`${API}/tunes/${tuneId}`, { headers: authHeaders() });
+}
+
+// === FaceID: genera una foto SENZA addestramento (per l'anteprima gratuita) ===
+// Modello base SD economico per le anteprime (Realistic Vision v5.1).
+const FACEID_BASE_TUNE_ID = process.env.ASTRIA_FACEID_BASE_ID || '690204';
+
+/** Crea un "tune" FaceID: pronto all'istante, nessun addestramento. */
+async function createFaceIdTune({ title, name, images }) {
+  const form = new FormData();
+  form.append('tune[title]', title);
+  form.append('tune[name]', name);
+  form.append('tune[model_type]', 'faceid');
+  form.append('tune[base_tune_id]', FACEID_BASE_TUNE_ID);
+  images.forEach((f) => form.append('tune[images][]', f.buffer, f.originalname || 'photo.jpg'));
+  const { data } = await axios.post(`${API}/tunes`, form, {
+    headers: { ...authHeaders(), ...form.getHeaders() },
+    maxBodyLength: Infinity, maxContentLength: Infinity,
+  });
+  return Array.isArray(data) ? data[0] : data; // la risposta FaceID è un array
+}
+
+/** Genera 1 immagine con l'adapter FaceID, sul modello base. */
+async function createFaceIdPrompt(faceTuneId, { text, callback }) {
+  const form = new FormData();
+  form.append('prompt[text]', `<faceid:${faceTuneId}:1> ${text}`);
+  form.append('prompt[face_correct]', 'true');
+  form.append('prompt[num_images]', '1');
+  if (callback) form.append('prompt[callback]', callback);
+  const { data } = await axios.post(`${API}/tunes/${FACEID_BASE_TUNE_ID}/prompts`, form, {
+    headers: { ...authHeaders(), ...form.getHeaders() },
+  });
+  return data;
+}
+
+module.exports = {
+  createTune, createPrompt, getTune, deleteTune,
+  createFaceIdTune, createFaceIdPrompt,
+  BASE_TUNE_ID, FACEID_BASE_TUNE_ID,
+};

@@ -4,9 +4,10 @@ const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { createTune, createPrompt } = require('./astria');
-const { getStyles } = require('./styles');
+const { createTune, createPrompt, deleteTune, createFaceIdTune, createFaceIdPrompt } = require('./astria');
+const { buildPrompts, STYLE_CATALOG } = require('./styles');
 const pay = require('./payments');
+const email = require('./email');
 
 const app = express();
 const PUBLIC_URL = process.env.PUBLIC_BASE_URL || '';
@@ -59,11 +60,15 @@ const upload = multer({
 // ============================================================
 app.post('/api/orders', upload.array('photos', 15), (req, res) => {
   try {
-    const email = (req.body.email || '').trim();
+    const customerEmail = (req.body.email || '').trim();
     const pkg = (req.body.package || 'base').toLowerCase();
     const subjectClass = (req.body.subjectClass || 'person').toLowerCase();
+    const consent = req.body.consent === 'true' || req.body.consent === 'on' || req.body.consent === true;
+    let styles = req.body.styles || [];
+    if (typeof styles === 'string') styles = [styles];
 
-    if (!email) return res.status(400).json({ error: 'Email mancante.' });
+    if (!customerEmail) return res.status(400).json({ error: 'Email mancante.' });
+    if (!consent) return res.status(400).json({ error: 'Devi accettare il consenso e i termini per continuare.' });
     if (!req.files || req.files.length < 4)
       return res.status(400).json({ error: 'Carica almeno 4 foto.' });
 
@@ -75,10 +80,11 @@ app.post('/api/orders', upload.array('photos', 15), (req, res) => {
 
     const db = load();
     db[id] = {
-      id, email, package: pkg, subjectClass,
+      id, email: customerEmail, package: pkg, subjectClass, styles,
       status: 'pending_payment',
       priceCents: pay.priceCents(pkg),
       createdAt: new Date().toISOString(),
+      consent: true, consentAt: new Date().toISOString(),
       photoCount: req.files.length,
       tuneId: null, eta: null,
       images: [], promptsTotal: 0, promptsDone: 0,
@@ -97,6 +103,66 @@ app.post('/api/orders', upload.array('photos', 15), (req, res) => {
     console.error('Errore /api/orders:', e.message);
     res.status(500).json({ error: 'Errore nella creazione dell\'ordine.' });
   }
+});
+
+// ============================================================
+// 1bis. ANTEPRIMA GRATUITA — 1 foto via FaceID (niente addestramento, ~€0,10)
+//        Limite: 1 per email.
+// ============================================================
+app.post('/api/preview', upload.array('photos', 10), async (req, res) => {
+  try {
+    const customerEmail = (req.body.email || '').trim();
+    const subjectClass = (req.body.subjectClass || 'person').toLowerCase();
+    if (!customerEmail) return res.status(400).json({ error: 'Email mancante.' });
+    if (!req.files || req.files.length < 3) return res.status(400).json({ error: 'Carica almeno 3 foto.' });
+
+    const db = load();
+    const already = Object.values(db).find((o) => o.kind === 'preview' && o.email === customerEmail);
+    if (already) return res.status(429).json({ error: 'Hai già usato l\'anteprima gratuita con questa email.' });
+
+    const id = 'pv_' + newId();
+    db[id] = {
+      id, kind: 'preview', email: customerEmail, subjectClass,
+      status: 'generating', createdAt: new Date().toISOString(),
+      image: null, faceTuneId: null,
+    };
+    save(db);
+
+    if (TEST_MODE) {
+      // Modalità test: niente chiamata reale, mostra un'immagine fittizia dopo qualche secondo
+      setTimeout(() => {
+        const d = load();
+        if (d[id]) { d[id].status = 'completed'; d[id].image = 'https://placehold.co/512x640/2f7df6/ffffff/png?text=Anteprima+photodin'; save(d); }
+      }, 3000);
+      return res.json({ previewId: id, status: 'generating' });
+    }
+
+    const tune = await createFaceIdTune({ title: id, name: subjectClass, images: req.files });
+    const db2 = load(); db2[id].faceTuneId = tune.id; save(db2);
+    const text = `ohwx ${subjectClass}, professional corporate headshot, studio lighting, neutral grey background, looking at camera`;
+    await createFaceIdPrompt(tune.id, { text, callback: `${PUBLIC_URL}/api/callbacks/preview?id=${id}` });
+    res.json({ previewId: id, status: 'generating' });
+  } catch (e) {
+    console.error('preview ERRORE → status:', e.response?.status, '| body:', JSON.stringify(e.response?.data), '| msg:', e.message);
+    res.status(500).json({ error: 'Errore nella generazione dell\'anteprima.' });
+  }
+});
+
+app.post('/api/callbacks/preview', (req, res) => {
+  const { id } = req.query;
+  const db = load();
+  const o = db[id];
+  if (o) {
+    const imgs = req.body.images || (req.body.prompt && req.body.prompt.images) || [];
+    if (imgs.length) { o.image = imgs[0]; o.status = 'completed'; save(db); }
+  }
+  res.sendStatus(200);
+});
+
+app.get('/api/preview/:id', (req, res) => {
+  const o = load()[req.params.id];
+  if (!o) return res.status(404).json({ error: 'Anteprima non trovata.' });
+  res.json({ id: o.id, status: o.status, image: o.image });
 });
 
 // ============================================================
@@ -172,8 +238,11 @@ app.post('/api/callbacks/prompt', (req, res) => {
     o.promptsDone += 1;
     if (o.promptsDone >= o.promptsTotal) {
       o.status = 'completed';
-      console.log(`[${order}] COMPLETATO — ${o.images.length} foto. TODO: email a ${o.email}`);
-      // TODO: invio email + cancellazione foto di training (GDPR, entro 24-48h)
+      o.completedAt = new Date().toISOString();
+      console.log(`[${order}] COMPLETATO — ${o.images.length} foto. Invio email a ${o.email}`);
+      const link = `${PUBLIC_URL}/grazie.html?order=${o.id}`;
+      email.sendPhotosReadyEmail(o, link).catch((e) =>
+        console.error('email errore:', e.response?.data || e.message));
     }
     save(db);
   }
@@ -227,6 +296,11 @@ app.post('/api/orders/:id/dev-pay', async (req, res) => {
   }
 });
 
+// Catalogo stili (per la pagina d'ordine)
+app.get('/api/styles', (req, res) => {
+  res.json(STYLE_CATALOG.map(({ id, label, desc }) => ({ id, label, desc })));
+});
+
 app.get('/health', (req, res) => res.json({ ok: true, testMode: TEST_MODE }));
 
 // ============================================================
@@ -252,7 +326,7 @@ async function startGeneration(orderId) {
     buffer: fs.readFileSync(path.join(dir, fn)),
     originalname: fn,
   }));
-  const styles = getStyles(o.package, o.subjectClass);
+  const styles = buildPrompts(o.styles, o.package, o.subjectClass);
 
   o.status = 'training';
   o.promptsTotal = styles.length;
@@ -278,6 +352,42 @@ async function startGeneration(orderId) {
   db2[orderId].eta = tune.eta;
   save(db2);
 }
+
+// ============================================================
+// Cancellazione automatica dei dati (GDPR): foto caricate +
+// modello e immagini su Astria, dopo la finestra di conservazione.
+// ============================================================
+const RETENTION_HOURS = parseInt(process.env.RETENTION_HOURS || '48', 10);
+
+async function cleanup() {
+  const db = load();
+  let changed = false;
+  const now = Date.now();
+  for (const id of Object.keys(db)) {
+    const o = db[id];
+    if (o.cleaned) continue;
+    const ref = o.completedAt || o.createdAt;
+    const ageH = (now - new Date(ref).getTime()) / 3600000;
+    // cancella se: completato da oltre RETENTION_HOURS, oppure ordine fermo da molto tempo
+    const expired = (o.completedAt && ageH >= RETENTION_HOURS) || ageH >= RETENTION_HOURS + 96;
+    if (!expired) continue;
+
+    try { fs.rmSync(path.join(UPLOADS, id), { recursive: true, force: true }); } catch (e) {}
+    const astriaId = o.tuneId || o.faceTuneId;
+    if (astriaId) {
+      try { await deleteTune(astriaId); }
+      catch (e) { console.error(`[${id}] deleteTune:`, e.response?.status || e.message); }
+    }
+    o.cleaned = true;
+    o.cleanedAt = new Date().toISOString();
+    o.images = [];
+    o.status = 'expired';
+    changed = true;
+    console.log(`[${id}] dati cancellati (GDPR)`);
+  }
+  if (changed) save(db);
+}
+setInterval(() => cleanup().catch((e) => console.error('cleanup:', e.message)), 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
