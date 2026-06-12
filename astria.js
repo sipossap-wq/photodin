@@ -34,6 +34,9 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
   } else {
     form.append('tune[base_tune_id]', BASE_TUNE_ID);
     form.append('tune[model_type]', 'lora');
+    // Preset di addestramento: 'flux-lora-portrait' (consigliato per headshot,
+    // 27 step/foto invece di 100 → costo ~$1,50 invece di ~$5, qualità migliore).
+    form.append('tune[preset]', process.env.ASTRIA_PRESET || 'flux-lora-portrait');
     if (branch) form.append('tune[branch]', branch);
   }
   if (callbackTune) form.append('tune[callback]', callbackTune);
