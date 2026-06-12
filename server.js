@@ -5,7 +5,7 @@ const multer = require('multer');
 const sizeOf = require('image-size');
 const fs = require('fs');
 const path = require('path');
-const { createTune, createPrompt, getTune, listPrompts, deleteTune, createFaceIdTune, createFaceIdPrompt } = require('./astria');
+const { createTune, createPrompt, getTune, listPrompts, deleteTune, createPackTune, createFaceIdTune, createFaceIdPrompt } = require('./astria');
 const { buildPrompts, STYLE_CATALOG } = require('./styles');
 const pay = require('./payments');
 const email = require('./email');
@@ -13,6 +13,11 @@ const email = require('./email');
 const app = express();
 const PUBLIC_URL = process.env.PUBLIC_BASE_URL || '';
 const TEST_MODE = process.env.ASTRIA_TEST_MODE === '1'; // branch=fast, generazione gratuita
+// MODALITÀ PACK: se impostato (es. 260 = Corporate Headshots di Astria),
+// training e generazione usano il set di prompt curato dal team Astria —
+// stesso identico risultato di astria.ai/p/corporate-headshots.
+// Il numero di foto lo decide il pack (~52-56), non il pacchetto venduto.
+const PACK_ID = process.env.ASTRIA_PACK_ID || '';
 // Permette di avviare un ordine senza pagamento (per provare la qualità reale).
 // Attivo automaticamente in TEST_MODE, oppure forzato con ALLOW_DEV_PAY=1.
 const ALLOW_DEV_PAY = TEST_MODE || process.env.ALLOW_DEV_PAY === '1';
@@ -243,10 +248,22 @@ app.post('/api/callbacks/tune', (req, res) => {
   if (!cbOk(req)) return res.sendStatus(403);
   const { order } = req.query;
   const db = load();
-  if (db[order] && db[order].status === 'training') {
-    db[order].status = 'generating';
+  const o = db[order];
+  if (o && o.status === 'training') {
+    o.status = 'generating';
     save(db);
     console.log(`[${order}] modello pronto, generazione in corso`);
+    // Modalità pack: il numero di prompt lo decide il pack → lo leggiamo ora
+    if (o.packId && !o.promptsTotal && o.tuneId) {
+      listPrompts(o.tuneId).then((prompts) => {
+        const d = load();
+        if (d[order] && !d[order].promptsTotal) {
+          d[order].promptsTotal = prompts.length;
+          save(d);
+          console.log(`[${order}] pack ${o.packId}: ${prompts.length} prompt in coda`);
+        }
+      }).catch((e) => console.error(`[${order}] lettura prompt pack:`, e.message));
+    }
   }
   res.sendStatus(200);
 });
@@ -261,7 +278,8 @@ app.post('/api/callbacks/prompt', (req, res) => {
     // dedup: il watchdog può aver già recuperato queste immagini via polling
     imgs.forEach((u) => { if (!o.images.includes(u)) o.images.push(u); });
     o.promptsDone += 1;
-    if (o.promptsDone >= o.promptsTotal) {
+    // guardia promptsTotal > 0: in modalità pack il totale arriva dopo il training
+    if (o.promptsTotal > 0 && o.promptsDone >= o.promptsTotal) {
       o.status = 'completed';
       o.completedAt = new Date().toISOString();
       console.log(`[${order}] COMPLETATO — ${o.images.length} foto. Invio email a ${o.email}`);
@@ -399,6 +417,31 @@ async function startGeneration(orderId) {
   };
   const res = RES[o.package] || RES.standard;
 
+  // --- MODALITÀ PACK: prompt e parametri curati da Astria ---
+  // promptsTotal non è noto in anticipo (lo decide il pack): parte a 0 e viene
+  // impostato dal callback del tune / watchdog leggendo i prompt creati.
+  if (PACK_ID && !TEST_MODE) {
+    o.status = 'training';
+    o.promptsTotal = 0;
+    o.promptsDone = 0;
+    o.images = [];
+    o.packId = PACK_ID;
+    save(db);
+    const tune = await createPackTune({
+      packId: PACK_ID,
+      title: orderId,
+      name: o.subjectClass === 'woman' ? 'woman' : 'man', // i pack supportano man/woman
+      images: files,
+      callbackTune: `${PUBLIC_URL}/api/callbacks/tune?order=${orderId}${cbSuffix}`,
+      promptCallback: `${PUBLIC_URL}/api/callbacks/prompt?order=${orderId}${cbSuffix}`,
+    });
+    const dbp = load();
+    dbp[orderId].tuneId = tune.id;
+    dbp[orderId].eta = tune.eta;
+    save(dbp);
+    return;
+  }
+
   o.status = 'training';
   o.promptsTotal = styles.length;
   o.promptsDone = 0;
@@ -506,10 +549,12 @@ async function watchdog() {
         const cur = db[id];
         if (!cur || cur.cleaned) continue;
         if (cur.status === 'training' && tune.trained_at) cur.status = 'generating';
+        // modalità pack: se il totale non è ancora noto, lo deduciamo dai prompt creati
+        if (!cur.promptsTotal && prompts.length) cur.promptsTotal = prompts.length;
         allImages.forEach((u) => { if (!cur.images.includes(u)) cur.images.push(u); });
         if (done > cur.promptsDone) cur.promptsDone = done;
         let justCompleted = false;
-        if (cur.promptsDone >= cur.promptsTotal && cur.images.length && cur.status !== 'completed') {
+        if (cur.promptsTotal > 0 && cur.promptsDone >= cur.promptsTotal && cur.images.length && cur.status !== 'completed') {
           cur.status = 'completed';
           cur.completedAt = new Date().toISOString();
           justCompleted = true;
@@ -539,7 +584,7 @@ setInterval(() => watchdog().catch((e) => console.error('watchdog:', e.message))
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`photodin backend su http://localhost:${PORT}`);
-  console.log(`  Stripe: ${pay.stripeEnabled() ? 'on' : 'off'} · TestMode: ${TEST_MODE ? 'on (branch=fast)' : 'off'} · Watchdog: ogni ${WATCHDOG_MIN} min`);
+  console.log(`  Stripe: ${pay.stripeEnabled() ? 'on' : 'off'} · TestMode: ${TEST_MODE ? 'on (branch=fast)' : 'off'} · Watchdog: ogni ${WATCHDOG_MIN} min · Generazione: ${PACK_ID ? `pack Astria ${PACK_ID}` : 'stili interni'}`);
   if (!PUBLIC_URL) console.warn('⚠  PUBLIC_BASE_URL non impostato: callback e pagamenti non funzioneranno.');
   if (!CB_SECRET) console.warn('⚠  CALLBACK_SECRET non impostato: i callback Astria non sono protetti.');
   if (!ADMIN_EMAIL) console.warn('⚠  ADMIN_EMAIL non impostato: nessun allarme per ordini bloccati.');
