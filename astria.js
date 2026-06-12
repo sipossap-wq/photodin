@@ -144,6 +144,30 @@ async function deleteTune(tuneId) {
   await axios.delete(`${API}/tunes/${tuneId}`, { headers: authHeaders() });
 }
 
+// === PACKS: set di prompt/parametri curati dal team Astria ===
+// Un pack (es. 260 = "Corporate Headshots", quello di astria.ai/p/corporate-headshots)
+// addestra il modello E genera l'intero set di foto progettato da Astria:
+// stesso identico risultato della loro pagina, senza prompt hard-coded da noi.
+/**
+ * Crea un tune da un pack: training + generazione automatica del set del pack.
+ * @param {Object} opts {packId, title, name ('man'|'woman'), images,
+ *                       callbackTune, promptCallback}
+ */
+async function createPackTune({ packId, title, name, images, callbackTune, promptCallback }) {
+  const form = new FormData();
+  form.append('tune[title]', title);
+  form.append('tune[name]', name);
+  form.append('tune[preset]', process.env.ASTRIA_PRESET || 'flux-lora-portrait');
+  if (callbackTune) form.append('tune[callback]', callbackTune);
+  if (promptCallback) form.append('tune[prompt_attributes][callback]', promptCallback);
+  images.forEach((f) => form.append('tune[images][]', f.buffer, f.originalname || 'photo.jpg'));
+  const { data } = await axios.post(`${API}/p/${packId}/tunes`, form, {
+    headers: { ...authHeaders(), ...form.getHeaders() },
+    maxBodyLength: Infinity, maxContentLength: Infinity,
+  });
+  return data;
+}
+
 // === FaceID: genera una foto SENZA addestramento (per l'anteprima gratuita) ===
 // Modello base SD economico per le anteprime (Realistic Vision v5.1).
 const FACEID_BASE_TUNE_ID = process.env.ASTRIA_FACEID_BASE_ID || '690204';
@@ -185,6 +209,6 @@ async function createFaceIdPrompt(faceTuneId, { text, callback }) {
 
 module.exports = {
   createTune, createPrompt, getTune, listPrompts, deleteTune,
-  createFaceIdTune, createFaceIdPrompt,
+  createPackTune, createFaceIdTune, createFaceIdPrompt,
   BASE_TUNE_ID, FACEID_BASE_TUNE_ID,
 };
