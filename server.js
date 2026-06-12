@@ -328,6 +328,14 @@ async function startGeneration(orderId) {
   }));
   const styles = buildPrompts(o.styles, o.package, o.subjectClass);
 
+  // Tetto foto per i TEST (es. TEST_MAX_PHOTOS=10): genera poche foto per spendere poco.
+  // Lascia vuoto / 0 in produzione.
+  const cap = parseInt(process.env.TEST_MAX_PHOTOS || '0', 10);
+  if (cap > 0 && styles.length) {
+    const per = Math.max(1, Math.round(cap / styles.length));
+    styles.forEach((s) => { s.num_images = per; });
+  }
+
   // Risoluzione per pacchetto:
   // standard = base (web) · pro = alta risoluzione + ritocco · studio = alta + ritocco (+ 4K, TODO da testare)
   const RES = {
