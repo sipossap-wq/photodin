@@ -61,7 +61,7 @@ const upload = multer({
 app.post('/api/orders', upload.array('photos', 15), (req, res) => {
   try {
     const customerEmail = (req.body.email || '').trim();
-    const pkg = (req.body.package || 'base').toLowerCase();
+    const pkg = (req.body.package || 'standard').toLowerCase();
     const subjectClass = (req.body.subjectClass || 'person').toLowerCase();
     const consent = req.body.consent === 'true' || req.body.consent === 'on' || req.body.consent === true;
     let styles = req.body.styles || [];
@@ -328,6 +328,15 @@ async function startGeneration(orderId) {
   }));
   const styles = buildPrompts(o.styles, o.package, o.subjectClass);
 
+  // Risoluzione per pacchetto:
+  // standard = base (web) · pro = alta risoluzione + ritocco · studio = alta + ritocco (+ 4K, TODO da testare)
+  const RES = {
+    standard: { superRes: false, faceCorrect: false },
+    pro:      { superRes: true,  faceCorrect: true },
+    studio:   { superRes: true,  faceCorrect: true },
+  };
+  const res = RES[o.package] || RES.standard;
+
   o.status = 'training';
   o.promptsTotal = styles.length;
   o.promptsDone = 0;
@@ -339,6 +348,8 @@ async function startGeneration(orderId) {
     name: o.subjectClass,
     images: files,
     branch: TEST_MODE ? 'fast' : undefined,
+    superRes: res.superRes,
+    faceCorrect: res.faceCorrect,
     callbackTune: `${PUBLIC_URL}/api/callbacks/tune?order=${orderId}`,
     prompts: styles.map((s) => ({
       text: s.text,

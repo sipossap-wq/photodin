@@ -23,7 +23,7 @@ function authHeaders() {
  * @param {Array}  [opts.prompts]   [{text, num_images, callback}]
  * @param {string} [opts.branch]    'fast' per il mock testing gratuito
  */
-async function createTune({ title, name, images, callbackTune, prompts = [], branch }) {
+async function createTune({ title, name, images, callbackTune, prompts = [], branch, superRes = true, faceCorrect = true }) {
   const form = new FormData();
   form.append('tune[title]', title);
   form.append('tune[name]', name);
@@ -45,8 +45,8 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
   prompts.forEach((p, i) => {
     form.append(`tune[prompts_attributes][${i}][text]`, p.text);
     form.append(`tune[prompts_attributes][${i}][num_images]`, String(p.num_images || 4));
-    form.append(`tune[prompts_attributes][${i}][inpaint_faces]`, 'true');
-    form.append(`tune[prompts_attributes][${i}][super_resolution]`, 'true');
+    form.append(`tune[prompts_attributes][${i}][inpaint_faces]`, faceCorrect ? 'true' : 'false');
+    form.append(`tune[prompts_attributes][${i}][super_resolution]`, superRes ? 'true' : 'false');
     if (p.callback) form.append(`tune[prompts_attributes][${i}][callback]`, p.callback);
   });
 

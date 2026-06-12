@@ -25,20 +25,20 @@ const STYLE_CATALOG = [
 ];
 
 // Quante foto totali genera ogni pacchetto
-const PACKAGE_PHOTOS = { base: 40, pro: 60 };
+const PACKAGE_PHOTOS = { standard: 30, pro: 100, studio: 120 };
 
 /**
  * Costruisce i prompt a partire dagli stili scelti dal cliente.
  * Le foto del pacchetto vengono distribuite sugli stili selezionati.
  */
-function buildPrompts(selectedIds, pkg = 'base', cls = 'person') {
+function buildPrompts(selectedIds, pkg = 'standard', cls = 'person') {
   let styles = (selectedIds || [])
     .map((id) => STYLE_CATALOG.find((s) => s.id === id))
     .filter(Boolean);
   // se non sceglie nulla, usa una selezione predefinita
-  if (styles.length === 0) styles = STYLE_CATALOG.slice(0, pkg === 'pro' ? 6 : 4);
+  if (styles.length === 0) styles = STYLE_CATALOG.slice(0, pkg === 'standard' ? 4 : 6);
 
-  const total = PACKAGE_PHOTOS[pkg] || PACKAGE_PHOTOS.base;
+  const total = PACKAGE_PHOTOS[pkg] || PACKAGE_PHOTOS.standard;
   const per = Math.max(1, Math.round(total / styles.length));
 
   return styles.map((s) => ({ text: `ohwx ${cls}, ${s.text}`, num_images: per }));

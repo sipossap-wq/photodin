@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Crea le tue foto — photodin</title>
+<title>Crea le tue foto — Photodin</title>
 <style>
   :root{--blu:#0f2a4a;--accent:#2f7df6;--accent-2:#19c0a3;--ink:#16202e;--muted:#5b6b80;--soft:#f4f7fb;--line:#e2e9f2}
   *{box-sizing:border-box;margin:0;padding:0}
@@ -40,7 +40,7 @@
 </style>
 </head>
 <body>
-  <div class="top"><div class="in"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>photodin</div></div>
+  <div class="top"><div class="in"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>Photodin</div></div>
 
   <div class="wrap">
     <h1>Crea le tue foto professionali</h1>
@@ -49,16 +49,21 @@
     <form id="f">
       <div class="card">
         <label>1 · Scegli il pacchetto</label>
-        <div class="plans">
-          <div class="plan" data-pkg="base">
-            <div class="nm">Base</div>
+        <div class="plans" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="plan" data-pkg="standard">
+            <div class="nm">Standard</div>
             <div class="pr">€19,90</div>
-            <div class="ds">40 foto professionali</div>
+            <div class="ds">30 foto · risoluzione standard · entro 2 ore</div>
           </div>
           <div class="plan" data-pkg="pro">
-            <div class="nm">Pro / Agenzia</div>
+            <div class="nm">Pro</div>
             <div class="pr">€34,90</div>
-            <div class="ds">60 foto, più stili business</div>
+            <div class="ds">100 foto · alta risoluzione + ritocco · entro 1 ora</div>
+          </div>
+          <div class="plan" data-pkg="studio">
+            <div class="nm">Studio</div>
+            <div class="pr">€49,90</div>
+            <div class="ds">120 foto in 4K · figura intera · priorità</div>
           </div>
         </div>
 
@@ -88,14 +93,6 @@
         </label>
       </div>
 
-      <div class="card" id="previewCard">
-        <p style="font-weight:700;color:var(--blu);margin-bottom:4px">✨ Prova gratis, prima di pagare</p>
-        <p class="muted" style="margin-bottom:12px">Genera 1 foto di prova gratuita: paghi solo se ti convince.</p>
-        <button type="button" id="previewBtn" class="btn b-dev">Genera 1 foto gratis</button>
-        <div id="previewOut" class="box" style="display:none"></div>
-        <div id="previewImg" style="margin-top:12px;text-align:center"></div>
-      </div>
-
       <button type="submit" class="btn b-primary">Continua al pagamento</button>
     </form>
 
@@ -113,12 +110,12 @@
 
 <script>
   const f=document.getElementById('f'),out=document.getElementById('out'),imgs=document.getElementById('imgs'),payBox=document.getElementById('pay');
-  let orderId=null,timer=null,pkg='base';
+  let orderId=null,timer=null,pkg='standard';
 
-  // pacchetto: da URL (?package=pro) o default base
+  // pacchetto: da URL (?package=standard|pro|studio) o default standard
   const qs=new URLSearchParams(location.search);
-  if(qs.get('package')==='pro')pkg='pro';
-  function paintPlans(){document.querySelectorAll('.plan').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
+  var qp=qs.get('package'); if(['standard','pro','studio'].indexOf(qp)>=0)pkg=qp;
+  function paintPlans(){document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
   document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
   paintPlans();
 
@@ -173,35 +170,6 @@
     const r=await fetch('/api/orders/'+orderId+'/checkout/'+m,{method:'POST'});
     const d=await r.json();
     if(d.url)location.href=d.url;else msg('Errore: '+(d.error||'pagamento non disponibile'));
-  }
-
-  // --- Anteprima gratuita ---
-  document.getElementById('previewBtn').onclick=async()=>{
-    const email=f.email.value.trim(), files=f.photos.files;
-    if(!email){previewMsg('Inserisci prima la tua email qui sopra.');return;}
-    if(!files||files.length<3){previewMsg('Carica almeno 3 foto qui sopra.');return;}
-    previewMsg('Sto generando la tua foto di prova… (qualche secondo)');
-    const fd=new FormData();
-    fd.set('email',email); fd.set('subjectClass',f.subjectClass.value);
-    for(const file of files) fd.append('photos',file);
-    try{
-      const r=await fetch('/api/preview',{method:'POST',body:fd});
-      const d=await r.json();
-      if(!r.ok){previewMsg(d.error||'Errore');return;}
-      pollPreview(d.previewId);
-    }catch(err){previewMsg('Errore di rete: '+err.message);}
-  };
-  function previewMsg(t){const o=document.getElementById('previewOut');o.style.display='block';o.textContent=t;}
-  function pollPreview(id){
-    const t=setInterval(async()=>{
-      const r=await fetch('/api/preview/'+id);const o=await r.json();
-      if(o.error)return;
-      if(o.status==='completed'&&o.image){
-        clearInterval(t);
-        previewMsg('Ecco la tua anteprima! Se ti piace, completa l’ordine qui sotto 👇');
-        document.getElementById('previewImg').innerHTML='<img src="'+o.image+'" style="max-width:260px;border-radius:12px">';
-      }
-    },4000);
   }
 
   function show(){out.style.display='block';}
