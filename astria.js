@@ -7,6 +7,25 @@ const KEY = process.env.ASTRIA_API_KEY;
 // Flux1.dev nella gallery Astria — qualità migliore per gli headshot.
 const BASE_TUNE_ID = process.env.ASTRIA_BASE_TUNE_ID || '1504944';
 
+// === Impostazioni REALISMO (riducono l'effetto "plastica" di Flux) ===
+// cfg_scale: più basso = pelle più naturale. Flux di default ~3.5; 3.0 è un buon
+// compromesso tra somiglianza e naturalezza. Regolabile da env.
+const CFG_SCALE = process.env.ASTRIA_CFG || '3';
+// Aggiunge grana fotografica → look meno digitale, più da macchina vera.
+const FILM_GRAIN = (process.env.ASTRIA_FILM_GRAIN || '1') === '1';
+// Color grading su pellicola Portra (incarnati naturali, ottima per ritratti).
+const COLOR_GRADING = process.env.ASTRIA_COLOR_GRADING || 'Film Portra';
+// NOTA: Flux NON supporta i negative prompt (docs Astria: "Flux doesn't work
+// with negatives"). Il realismo va espresso in POSITIVO nei prompt (styles.js).
+// ASTRIA_NEG resta usato solo per l'anteprima FaceID su base SD1.5.
+const NEG_PROMPT = process.env.ASTRIA_NEG ||
+  'plastic skin, waxy skin, airbrushed, oversmoothed, blurry skin, cgi, 3d render, doll-like, artificial';
+// Step di diffusione (opzionale: 28-36 consigliati). Vuoto = default Astria.
+const STEPS = process.env.ASTRIA_STEPS || '';
+// face_swap: usa le foto di training per aumentare la somiglianza del volto.
+// Leva extra di fedeltà (opt-in da env: ASTRIA_FACE_SWAP=1).
+const FACE_SWAP = process.env.ASTRIA_FACE_SWAP === '1';
+
 function authHeaders() {
   if (!KEY) throw new Error('ASTRIA_API_KEY mancante nel file .env');
   return { Authorization: `Bearer ${KEY}` };
@@ -47,14 +66,27 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
   });
 
   prompts.forEach((p, i) => {
-    form.append(`tune[prompts_attributes][${i}][text]`, p.text);
-    form.append(`tune[prompts_attributes][${i}][num_images]`, String(p.num_images || 4));
-    form.append(`tune[prompts_attributes][${i}][inpaint_faces]`, faceCorrect ? 'true' : 'false');
-    form.append(`tune[prompts_attributes][${i}][super_resolution]`, superRes ? 'true' : 'false');
+    const k = (field) => `tune[prompts_attributes][${i}][${field}]`;
+    form.append(k('text'), p.text);
+    form.append(k('num_images'), String(p.num_images || 4));
+    form.append(k('super_resolution'), superRes ? 'true' : 'false');
+    // inpaint_faces richiede super_resolution attiva: lo mando solo se superRes è on.
+    if (superRes && faceCorrect) {
+      form.append(k('inpaint_faces'), 'true');
+      // hires_fix aggiunge dettaglio di pelle nell'upscale (contrasta l'effetto liscio).
+      form.append(k('hires_fix'), 'true');
+    }
+    // --- Leve di realismo ---
+    if (CFG_SCALE) form.append(k('cfg_scale'), CFG_SCALE);
+    if (FILM_GRAIN) form.append(k('film_grain'), 'true');
+    if (COLOR_GRADING) form.append(k('color_grading'), COLOR_GRADING);
+    // niente negative_prompt: ignorato da Flux (vedi nota in alto)
+    if (FACE_SWAP) form.append(k('face_swap'), 'true');
+    if (STEPS) form.append(k('steps'), STEPS);
     // Ritratto verticale 4:5 (raccomandato da Astria, evita artefatti tipo doppia testa)
-    form.append(`tune[prompts_attributes][${i}][w]`, '896');
-    form.append(`tune[prompts_attributes][${i}][h]`, '1152');
-    if (p.callback) form.append(`tune[prompts_attributes][${i}][callback]`, p.callback);
+    form.append(k('w'), '896');
+    form.append(k('h'), '1152');
+    if (p.callback) form.append(k('callback'), p.callback);
   });
 
   const { data } = await axios.post(`${API}/tunes`, form, {
@@ -67,16 +99,28 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
 
 /**
  * Genera nuove immagini su un tune esistente (es. rigenerazione gratuita).
+ * Flusso documentato per Flux LoRA: il prompt va POSTato sul MODELLO BASE
+ * con il LoRA caricato via sintassi <lora:id:1> (docs.astria.ai/docs/api/flux-api).
+ * Usa gli stessi parametri di realismo della generazione principale, così le
+ * foto rigenerate hanno qualità identica alle originali.
  */
 async function createPrompt(tuneId, { text, num_images = 4, callback }) {
   const form = new FormData();
-  form.append('prompt[text]', text);
+  form.append('prompt[text]', `<lora:${tuneId}:1> ${text}`);
   form.append('prompt[num_images]', String(num_images));
-  form.append('prompt[inpaint_faces]', 'true');
   form.append('prompt[super_resolution]', 'true');
+  form.append('prompt[inpaint_faces]', 'true');
+  form.append('prompt[hires_fix]', 'true');
+  if (CFG_SCALE) form.append('prompt[cfg_scale]', CFG_SCALE);
+  if (FILM_GRAIN) form.append('prompt[film_grain]', 'true');
+  if (COLOR_GRADING) form.append('prompt[color_grading]', COLOR_GRADING);
+  if (FACE_SWAP) form.append('prompt[face_swap]', 'true');
+  if (STEPS) form.append('prompt[steps]', STEPS);
+  form.append('prompt[w]', '896');
+  form.append('prompt[h]', '1152');
   if (callback) form.append('prompt[callback]', callback);
 
-  const { data } = await axios.post(`${API}/tunes/${tuneId}/prompts`, form, {
+  const { data } = await axios.post(`${API}/tunes/${BASE_TUNE_ID}/prompts`, form, {
     headers: { ...authHeaders(), ...form.getHeaders() },
   });
   return data;
@@ -85,6 +129,13 @@ async function createPrompt(tuneId, { text, num_images = 4, callback }) {
 /** Recupera lo stato di un tune. */
 async function getTune(tuneId) {
   const { data } = await axios.get(`${API}/tunes/${tuneId}`, { headers: authHeaders() });
+  return data;
+}
+
+/** Lista i prompt di un tune (usato dal watchdog per recuperare ordini
+ *  i cui callback sono andati persi: riavvii, deploy, timeout). */
+async function listPrompts(tuneId) {
+  const { data } = await axios.get(`${API}/tunes/${tuneId}/prompts`, { headers: authHeaders() });
   return data;
 }
 
@@ -116,7 +167,14 @@ async function createFaceIdTune({ title, name, images }) {
 async function createFaceIdPrompt(faceTuneId, { text, callback }) {
   const form = new FormData();
   form.append('prompt[text]', `<faceid:${faceTuneId}:1> ${text}`);
+  // Raccomandati dai docs FaceID per realismo e somiglianza:
   form.append('prompt[face_correct]', 'true');
+  form.append('prompt[face_swap]', 'true');
+  form.append('prompt[super_resolution]', 'true');
+  form.append('prompt[w]', '512');
+  form.append('prompt[h]', '640');
+  // Sul base SD1.5 il negative prompt FUNZIONA (a differenza di Flux):
+  if (NEG_PROMPT) form.append('prompt[negative_prompt]', NEG_PROMPT);
   form.append('prompt[num_images]', '1');
   if (callback) form.append('prompt[callback]', callback);
   const { data } = await axios.post(`${API}/tunes/${FACEID_BASE_TUNE_ID}/prompts`, form, {
@@ -126,7 +184,7 @@ async function createFaceIdPrompt(faceTuneId, { text, callback }) {
 }
 
 module.exports = {
-  createTune, createPrompt, getTune, deleteTune,
+  createTune, createPrompt, getTune, listPrompts, deleteTune,
   createFaceIdTune, createFaceIdPrompt,
   BASE_TUNE_ID, FACEID_BASE_TUNE_ID,
 };

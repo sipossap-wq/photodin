@@ -6,15 +6,13 @@ Flusso: foto del cliente → addestra un modello del volto (tune) → genera i r
 ## Flusso
 
 1. Il cliente carica le foto → si crea un ordine `pending_payment` (foto salvate, Astria **non** ancora chiamato)
-2. Il cliente paga con **Stripe** o **PayPal**
+2. Il cliente paga con **Stripe** (carta, Apple Pay, Google Pay)
 3. A pagamento confermato la generazione parte da sola
 
 ## Endpoint
 
 - `POST /api/orders` — crea l'ordine (email + foto), stato `pending_payment`
 - `POST /api/orders/:id/checkout/stripe` — avvia pagamento Stripe → URL
-- `POST /api/orders/:id/checkout/paypal` — avvia pagamento PayPal → URL
-- `GET  /api/orders/:id/paypal/return` — ritorno PayPal (capture + avvio)
 - `POST /api/webhooks/stripe` — webhook Stripe (avvia la generazione)
 - `POST /api/callbacks/tune` / `…/prompt` — webhook Astria
 - `GET  /api/orders/:id` — stato e foto pronte (polling)
@@ -37,8 +35,7 @@ I pacchetti sono in `styles.js`: **Base** = 40 foto (8 stili × 5), **Pro** = 60
    ```
    - `ASTRIA_API_KEY` → da https://www.astria.ai/users/edit#api
    - `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` → dashboard Stripe (chiavi "test")
-   - `PAYPAL_CLIENT_ID` + `PAYPAL_CLIENT_SECRET` → developer.paypal.com (env `sandbox`)
-   - `PUBLIC_BASE_URL` → vedi punto 3
+      - `PUBLIC_BASE_URL` → vedi punto 3
    - `ASTRIA_TEST_MODE=1` → genera immagini mock **gratis** finché provi l'integrazione
 
    ### Webhook Stripe

@@ -1,10 +1,11 @@
-// server.js — backend photodin (Astria + Stripe + PayPal)
+// server.js — backend photodin (Astria + Stripe)
 require('dotenv').config();
 const express = require('express');
 const multer = require('multer');
+const sizeOf = require('image-size');
 const fs = require('fs');
 const path = require('path');
-const { createTune, createPrompt, deleteTune, createFaceIdTune, createFaceIdPrompt } = require('./astria');
+const { createTune, createPrompt, getTune, listPrompts, deleteTune, createFaceIdTune, createFaceIdPrompt } = require('./astria');
 const { buildPrompts, STYLE_CATALOG } = require('./styles');
 const pay = require('./payments');
 const email = require('./email');
@@ -23,8 +24,45 @@ const DB = path.join(DATA_DIR, 'orders.json');
 fs.mkdirSync(UPLOADS, { recursive: true });
 if (!fs.existsSync(DB)) fs.writeFileSync(DB, '{}');
 const load = () => JSON.parse(fs.readFileSync(DB, 'utf8'));
-const save = (d) => fs.writeFileSync(DB, JSON.stringify(d, null, 2));
+// Scrittura ATOMICA (tmp + rename): un crash a metà scrittura non può più
+// corrompere orders.json e perdere tutti gli ordini.
+const save = (d) => {
+  const tmp = DB + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(d, null, 2));
+  fs.renameSync(tmp, DB);
+};
+// REGOLA: tra load() e save() non ci devono MAI essere await, altrimenti due
+// richieste concorrenti si sovrascrivono (lost update). Tutte le mutazioni
+// sotto seguono questo pattern: load → modifica sincrona → save.
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// Segreto nei callback Astria: senza, chiunque conosca un orderId può
+// completare ordini con immagini false. Imposta CALLBACK_SECRET in .env.
+const CB_SECRET = process.env.CALLBACK_SECRET || '';
+const cbSuffix = CB_SECRET ? `&secret=${encodeURIComponent(CB_SECRET)}` : '';
+const cbOk = (req) => !CB_SECRET || req.query.secret === CB_SECRET;
+// Email a cui mandare gli allarmi (ordini pagati con generazione fallita).
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || '';
+function alertAdmin(subject, text) {
+  if (!ADMIN_EMAIL) return Promise.resolve();
+  return email.sendEmail({ to: ADMIN_EMAIL, subject: `[photodin] ${subject}`, html: `<pre>${text}</pre>` })
+    .catch((e) => console.error('alertAdmin:', e.message));
+}
+
+// Controllo qualità input: foto piccole/sgranate → somiglianza scarsa e
+// risultati "AI". Richiediamo almeno 512px sul lato corto (i selfie moderni
+// sono ≥1080px, quindi blocca solo screenshot/thumbnail/foto compresse da chat).
+const MIN_SIDE = parseInt(process.env.MIN_PHOTO_SIDE || '512', 10);
+function checkPhotoQuality(files) {
+  const bad = [];
+  files.forEach((f, i) => {
+    try {
+      const d = sizeOf(f.buffer);
+      if (Math.min(d.width, d.height) < MIN_SIDE) bad.push(i + 1);
+    } catch (e) { bad.push(i + 1); } // formato non riconosciuto
+  });
+  return bad;
+}
 
 // ============================================================
 // IMPORTANTE: il webhook Stripe deve ricevere il body RAW,
@@ -40,8 +78,10 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
   }
   if (event.type === 'checkout.session.completed') {
     const orderId = event.data.object.metadata?.orderId;
-    try { await markPaidAndStart(orderId, 'stripe'); }
-    catch (e) { console.error('Avvio generazione fallito:', e.response?.data || e.message); }
+    // Rispondi SUBITO a Stripe (l'upload delle foto ad Astria può superare il
+    // timeout del webhook e causare retry); la generazione parte in background.
+    markPaidAndStart(orderId, 'stripe')
+      .catch((e) => console.error('Avvio generazione fallito:', e.response?.data || e.message));
   }
   res.json({ received: true });
 });
@@ -69,8 +109,15 @@ app.post('/api/orders', upload.array('photos', 30), (req, res) => {
 
     if (!customerEmail) return res.status(400).json({ error: 'Email mancante.' });
     if (!consent) return res.status(400).json({ error: 'Devi accettare il consenso e i termini per continuare.' });
-    if (!req.files || req.files.length < 4)
-      return res.status(400).json({ error: 'Carica almeno 4 foto.' });
+    // Astria raccomanda ~16 immagini varie (sfondi/luci/giorni diversi).
+    // Sotto le 6 la somiglianza degrada visibilmente.
+    if (!req.files || req.files.length < 6)
+      return res.status(400).json({ error: 'Carica almeno 6 foto (consigliate 8-16, varie per sfondo e luce).' });
+    if (!TEST_MODE) {
+      const bad = checkPhotoQuality(req.files);
+      if (bad.length)
+        return res.status(400).json({ error: `Le foto n° ${bad.join(', ')} sono troppo piccole o non valide: usa foto originali di almeno ${MIN_SIDE}px (no screenshot o foto compresse da chat).` });
+    }
 
     const id = newId();
     const dir = path.join(UPLOADS, id);
@@ -96,7 +143,7 @@ app.post('/api/orders', upload.array('photos', 30), (req, res) => {
       orderId: id,
       status: 'pending_payment',
       amount: (pay.priceCents(pkg) / 100).toFixed(2),
-      methods: { stripe: pay.stripeEnabled(), paypal: pay.paypalEnabled() },
+      methods: { stripe: pay.stripeEnabled() },
       testMode: TEST_MODE,
       devPay: ALLOW_DEV_PAY,
     });
@@ -116,6 +163,11 @@ app.post('/api/preview', upload.array('photos', 30), async (req, res) => {
     const subjectClass = (req.body.subjectClass || 'person').toLowerCase();
     if (!customerEmail) return res.status(400).json({ error: 'Email mancante.' });
     if (!req.files || req.files.length < 3) return res.status(400).json({ error: 'Carica almeno 3 foto.' });
+    if (!TEST_MODE) {
+      const bad = checkPhotoQuality(req.files);
+      if (bad.length)
+        return res.status(400).json({ error: `Le foto n° ${bad.join(', ')} sono troppo piccole o non valide: usa foto originali di almeno ${MIN_SIDE}px.` });
+    }
 
     const db = load();
     const already = Object.values(db).find((o) => o.kind === 'preview' && o.email === customerEmail);
@@ -140,8 +192,9 @@ app.post('/api/preview', upload.array('photos', 30), async (req, res) => {
 
     const tune = await createFaceIdTune({ title: id, name: subjectClass, images: req.files });
     const db2 = load(); db2[id].faceTuneId = tune.id; save(db2);
-    const text = `ohwx ${subjectClass}, professional corporate headshot, studio lighting, neutral grey background, looking at camera`;
-    await createFaceIdPrompt(tune.id, { text, callback: `${PUBLIC_URL}/api/callbacks/preview?id=${id}` });
+    // Nota: con FaceID il token 'ohwx' non serve (l'identità arriva da <faceid:id>).
+    const text = `${subjectClass}, professional corporate headshot photograph, head and shoulders, neutral grey studio background, soft studio lighting, looking at camera, natural skin texture, sharp focus on the eyes`;
+    await createFaceIdPrompt(tune.id, { text, callback: `${PUBLIC_URL}/api/callbacks/preview?id=${id}${cbSuffix}` });
     res.json({ previewId: id, status: 'generating' });
   } catch (e) {
     console.error('preview ERRORE → status:', e.response?.status, '| body:', JSON.stringify(e.response?.data), '| msg:', e.message);
@@ -150,6 +203,7 @@ app.post('/api/preview', upload.array('photos', 30), async (req, res) => {
 });
 
 app.post('/api/callbacks/preview', (req, res) => {
+  if (!cbOk(req)) return res.sendStatus(403);
   const { id } = req.query;
   const db = load();
   const o = db[id];
@@ -183,42 +237,10 @@ app.post('/api/orders/:id/checkout/stripe', async (req, res) => {
 });
 
 // ============================================================
-// 2b. Checkout PAYPAL → crea l'ordine e restituisce l'URL approve
-// ============================================================
-app.post('/api/orders/:id/checkout/paypal', async (req, res) => {
-  try {
-    const o = load()[req.params.id];
-    if (!o) return res.status(404).json({ error: 'Ordine non trovato.' });
-    if (!PUBLIC_URL) return res.status(500).json({ error: 'PUBLIC_BASE_URL non configurato.' });
-    const ppo = await pay.createPaypalOrder(o, PUBLIC_URL);
-    const approve = (ppo.links || []).find((l) => l.rel === 'approve');
-    const db = load(); db[o.id].paypalOrderId = ppo.id; save(db);
-    res.json({ url: approve?.href });
-  } catch (e) {
-    console.error('Errore PayPal create:', e.response?.data || e.message);
-    res.status(500).json({ error: 'Errore nell\'avvio del pagamento PayPal.' });
-  }
-});
-
-// 2c. Ritorno da PayPal → cattura il pagamento e avvia la generazione
-app.get('/api/orders/:id/paypal/return', async (req, res) => {
-  try {
-    const cap = await pay.capturePaypalOrder(req.query.token);
-    if (cap.status === 'COMPLETED') {
-      await markPaidAndStart(req.params.id, 'paypal');
-      return res.redirect(`/grazie.html?order=${req.params.id}`);
-    }
-    res.redirect('/?error=paypal');
-  } catch (e) {
-    console.error('Errore PayPal capture:', e.response?.data || e.message);
-    res.redirect('/?error=paypal');
-  }
-});
-
-// ============================================================
 // 3. Callback Astria
 // ============================================================
 app.post('/api/callbacks/tune', (req, res) => {
+  if (!cbOk(req)) return res.sendStatus(403);
   const { order } = req.query;
   const db = load();
   if (db[order] && db[order].status === 'training') {
@@ -230,12 +252,14 @@ app.post('/api/callbacks/tune', (req, res) => {
 });
 
 app.post('/api/callbacks/prompt', (req, res) => {
+  if (!cbOk(req)) return res.sendStatus(403);
   const { order } = req.query;
   const db = load();
   const o = db[order];
   if (o) {
     const imgs = req.body.images || (req.body.prompt && req.body.prompt.images) || [];
-    o.images.push(...imgs);
+    // dedup: il watchdog può aver già recuperato queste immagini via polling
+    imgs.forEach((u) => { if (!o.images.includes(u)) o.images.push(u); });
     o.promptsDone += 1;
     if (o.promptsDone >= o.promptsTotal) {
       o.status = 'completed';
@@ -263,19 +287,27 @@ app.get('/api/orders/:id', (req, res) => {
   });
 });
 
-// 5. Rigenerazione gratuita (garanzia)
+// 5. Rigenerazione gratuita (garanzia) — con limiti anti-abuso:
+//    max REGEN_LIMIT per ordine e mai dopo il cleanup (il tune non esiste più).
+const REGEN_LIMIT = parseInt(process.env.REGEN_LIMIT || '2', 10);
 app.post('/api/orders/:id/regenerate', async (req, res) => {
   try {
     const o = load()[req.params.id];
     if (!o || !o.tuneId) return res.status(404).json({ error: 'Ordine non trovato.' });
-    const text = req.body.text ||
-      `ohwx ${o.subjectClass}, professional corporate headshot, soft studio lighting, neutral background`;
+    if (o.cleaned) return res.status(410).json({ error: 'Ordine scaduto: i dati sono stati cancellati (GDPR).' });
+    if ((o.regens || 0) >= REGEN_LIMIT)
+      return res.status(429).json({ error: 'Hai già usato tutte le rigenerazioni incluse. Scrivici se c\'è un problema con le foto.' });
+    // Stesso prompt "corporate" del catalogo, così la rigenerazione ha la
+    // stessa qualità/coerenza delle foto originali.
+    const corporate = STYLE_CATALOG.find((s) => s.id === 'corporate');
+    const text = req.body.text || `ohwx ${o.subjectClass}, ${corporate.text}`;
     const p = await createPrompt(o.tuneId, {
       text, num_images: 5,
-      callback: `${PUBLIC_URL}/api/callbacks/prompt?order=${o.id}`,
+      callback: `${PUBLIC_URL}/api/callbacks/prompt?order=${o.id}${cbSuffix}`,
     });
     const db = load();
     db[o.id].promptsTotal += 1;
+    db[o.id].regens = (db[o.id].regens || 0) + 1;
     db[o.id].status = 'generating';
     save(db);
     res.json({ ok: true, promptId: p.id });
@@ -316,7 +348,31 @@ async function markPaidAndStart(orderId, method) {
   o.paidAt = new Date().toISOString();
   save(db);
   console.log(`[${orderId}] pagato con ${method} — avvio generazione`);
-  await startGeneration(orderId);
+  await tryStartGeneration(orderId);
+}
+
+// Avvio con recovery: se Astria fallisce, l'ordine torna 'paid' e il watchdog
+// riprova (max 3 tentativi). Cliente pagante ≠ buco nero: dopo l'ultimo
+// tentativo parte un'email di allarme all'admin.
+const MAX_START_ATTEMPTS = 3;
+async function tryStartGeneration(orderId) {
+  try {
+    await startGeneration(orderId);
+  } catch (e) {
+    const detail = JSON.stringify(e.response?.data) || e.message;
+    const db = load();
+    const o = db[orderId];
+    if (!o) return;
+    o.status = 'paid'; // torna in coda per il watchdog
+    o.startAttempts = (o.startAttempts || 0) + 1;
+    o.lastStartError = detail;
+    save(db);
+    console.error(`[${orderId}] avvio generazione fallito (tentativo ${o.startAttempts}/${MAX_START_ATTEMPTS}):`, detail);
+    if (o.startAttempts >= MAX_START_ATTEMPTS) {
+      await alertAdmin(`ORDINE PAGATO BLOCCATO: ${orderId}`,
+        `Ordine ${orderId} (${o.email}, ${o.package}) pagato ma generazione fallita ${o.startAttempts} volte.\nUltimo errore: ${detail}\nIntervieni manualmente.`);
+    }
+  }
 }
 
 async function startGeneration(orderId) {
@@ -333,12 +389,13 @@ async function startGeneration(orderId) {
   const cap = parseInt(process.env.TEST_MAX_PHOTOS || '0', 10);
   const styles = buildPrompts(o.styles, o.package, o.subjectClass, cap > 0 ? cap : undefined);
 
-  // Risoluzione per pacchetto:
-  // standard = base (web) · pro = alta risoluzione + ritocco · studio = alta + ritocco (+ 4K, TODO da testare)
+  // Qualità per pacchetto: super_resolution + inpaint_faces SEMPRE attivi.
+  // Il face inpainting è la leva n°1 contro l'effetto "viso AI": senza,
+  // anche il pacchetto base sembra finto e genera richieste di rimborso.
   const RES = {
-    standard: { superRes: false, faceCorrect: true },
-    pro:      { superRes: true,  faceCorrect: true },
-    studio:   { superRes: true,  faceCorrect: true },
+    standard: { superRes: true, faceCorrect: true },
+    pro:      { superRes: true, faceCorrect: true },
+    studio:   { superRes: true, faceCorrect: true },
   };
   const res = RES[o.package] || RES.standard;
 
@@ -355,11 +412,11 @@ async function startGeneration(orderId) {
     branch: TEST_MODE ? 'fast' : undefined,
     superRes: res.superRes,
     faceCorrect: res.faceCorrect,
-    callbackTune: `${PUBLIC_URL}/api/callbacks/tune?order=${orderId}`,
+    callbackTune: `${PUBLIC_URL}/api/callbacks/tune?order=${orderId}${cbSuffix}`,
     prompts: styles.map((s) => ({
       text: s.text,
       num_images: s.num_images,
-      callback: `${PUBLIC_URL}/api/callbacks/prompt?order=${orderId}`,
+      callback: `${PUBLIC_URL}/api/callbacks/prompt?order=${orderId}${cbSuffix}`,
     })),
   });
 
@@ -405,9 +462,86 @@ async function cleanup() {
 }
 setInterval(() => cleanup().catch((e) => console.error('cleanup:', e.message)), 60 * 60 * 1000);
 
+// ============================================================
+// WATCHDOG: rete di sicurezza contro gli ordini bloccati.
+// 1) Ordini 'paid' fermi → riprova l'avvio della generazione.
+// 2) Ordini 'training'/'generating' fermi → interroga Astria e riconcilia
+//    lo stato (recupera i callback persi per riavvii/deploy/timeout).
+// ============================================================
+const WATCHDOG_MIN = parseInt(process.env.WATCHDOG_MINUTES || '10', 10);
+
+async function watchdog() {
+  if (TEST_MODE) return; // in test i tune sono mock
+  const now = Date.now();
+  const snapshot = load(); // sola lettura per decidere chi controllare
+  for (const id of Object.keys(snapshot)) {
+    const o = snapshot[id];
+    if (o.cleaned || o.kind === 'preview') continue;
+
+    // 1) pagato ma mai partito (o avvio fallito): riprova
+    if (o.status === 'paid' && (o.startAttempts || 0) < MAX_START_ATTEMPTS) {
+      const ageMin = (now - new Date(o.paidAt || o.createdAt).getTime()) / 60000;
+      if (ageMin >= 3) {
+        console.log(`[${id}] watchdog: riprovo avvio generazione`);
+        await tryStartGeneration(id);
+      }
+      continue;
+    }
+
+    // 2) in lavorazione da troppo tempo: riconcilia con Astria
+    if ((o.status === 'training' || o.status === 'generating') && o.tuneId) {
+      const ageMin = (now - new Date(o.paidAt || o.createdAt).getTime()) / 60000;
+      if (ageMin < 20) continue; // tempi normali di Astria, lascia lavorare
+      try {
+        const [tune, prompts] = [await getTune(o.tuneId), await listPrompts(o.tuneId)];
+        const allImages = [];
+        let done = 0;
+        prompts.forEach((p) => {
+          const imgs = p.images || [];
+          if (imgs.length) done += 1;
+          allImages.push(...imgs);
+        });
+        // mutazione sincrona: load → modifica → save, senza await in mezzo
+        const db = load();
+        const cur = db[id];
+        if (!cur || cur.cleaned) continue;
+        if (cur.status === 'training' && tune.trained_at) cur.status = 'generating';
+        allImages.forEach((u) => { if (!cur.images.includes(u)) cur.images.push(u); });
+        if (done > cur.promptsDone) cur.promptsDone = done;
+        let justCompleted = false;
+        if (cur.promptsDone >= cur.promptsTotal && cur.images.length && cur.status !== 'completed') {
+          cur.status = 'completed';
+          cur.completedAt = new Date().toISOString();
+          justCompleted = true;
+        }
+        save(db);
+        if (justCompleted) {
+          console.log(`[${id}] watchdog: ordine recuperato e COMPLETATO (${cur.images.length} foto)`);
+          const link = `${PUBLIC_URL}/grazie.html?order=${id}`;
+          email.sendPhotosReadyEmail(cur, link).catch((e) =>
+            console.error('email errore:', e.response?.data || e.message));
+        }
+      } catch (e) {
+        console.error(`[${id}] watchdog riconciliazione:`, e.response?.status || e.message);
+      }
+      // 3) fermo da MOLTO troppo (>3h): allarme admin una sola volta
+      if (ageMin > 180 && !o.stuckAlerted) {
+        const db = load();
+        if (db[id]) { db[id].stuckAlerted = true; save(db); }
+        await alertAdmin(`Ordine fermo da ${Math.round(ageMin / 60)}h: ${id}`,
+          `Ordine ${id} (${o.email}, ${o.package}) in stato '${o.status}' da ${Math.round(ageMin)} minuti.\nTune: ${o.tuneId}. Controlla su astria.ai.`);
+      }
+    }
+  }
+}
+setInterval(() => watchdog().catch((e) => console.error('watchdog:', e.message)), WATCHDOG_MIN * 60 * 1000);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`photodin backend su http://localhost:${PORT}`);
-  console.log(`  Stripe: ${pay.stripeEnabled() ? 'on' : 'off'} · PayPal: ${pay.paypalEnabled() ? 'on' : 'off'} · TestMode: ${TEST_MODE ? 'on (branch=fast)' : 'off'}`);
+  console.log(`  Stripe: ${pay.stripeEnabled() ? 'on' : 'off'} · TestMode: ${TEST_MODE ? 'on (branch=fast)' : 'off'} · Watchdog: ogni ${WATCHDOG_MIN} min`);
   if (!PUBLIC_URL) console.warn('⚠  PUBLIC_BASE_URL non impostato: callback e pagamenti non funzioneranno.');
+  if (!CB_SECRET) console.warn('⚠  CALLBACK_SECRET non impostato: i callback Astria non sono protetti.');
+  if (!ADMIN_EMAIL) console.warn('⚠  ADMIN_EMAIL non impostato: nessun allarme per ordini bloccati.');
+  if (ALLOW_DEV_PAY && !TEST_MODE) console.warn('⚠  ALLOW_DEV_PAY attivo FUORI dal test mode: chiunque può generare gratis!');
 });
