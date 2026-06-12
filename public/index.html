@@ -9,7 +9,11 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--soft);line-height:1.6}
   .top{background:#fff;border-bottom:1px solid var(--line)}
-  .top .in{max-width:760px;margin:0 auto;padding:16px 20px;display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:var(--blu)}
+  .top .in{max-width:760px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:10px}
+  .top .back{width:30px;font-size:24px;line-height:1;color:var(--blu);cursor:pointer;text-decoration:none}
+  .top .back:hover{color:var(--accent)}
+  .top .brand{flex:1;display:flex;align-items:center;justify-content:center;gap:9px;font-weight:800;font-size:20px;color:var(--blu);cursor:pointer}
+  .top .spacer{width:30px}
   .dot{width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center}
   .dot svg{width:17px;height:17px;fill:#fff}
   .wrap{max-width:760px;margin:0 auto;padding:30px 20px 60px}
@@ -40,7 +44,11 @@
 </style>
 </head>
 <body>
-  <div class="top"><div class="in"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>Photodin</div></div>
+  <div class="top"><div class="in">
+    <a class="back" onclick="goHome()" aria-label="Indietro" title="Torna alla home">←</a>
+    <a class="brand" onclick="goHome()"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>Photodin</a>
+    <span class="spacer"></span>
+  </div></div>
 
   <div class="wrap">
     <h1>Crea le tue foto professionali</h1>
@@ -67,9 +75,14 @@
           </div>
         </div>
 
-        <label>2 · Scegli gli stili</label>
-        <div id="styleGrid" class="plans" style="grid-template-columns:1fr 1fr;gap:10px"></div>
-        <div class="hint" style="margin-top:6px">Seleziona uno o più stili: le foto del pacchetto si distribuiscono tra quelli scelti.</div>
+        <div id="styleSection">
+          <label>2 · Scegli gli stili</label>
+          <div id="styleGrid" class="plans" style="grid-template-columns:1fr 1fr;gap:10px"></div>
+          <div class="hint" style="margin-top:6px">Seleziona uno o più stili: le foto del pacchetto si distribuiscono tra quelli scelti.</div>
+        </div>
+        <div id="standardNote" class="hint" style="display:none;background:#eef4ff;border:1px solid #d7e6ff;border-radius:10px;padding:12px 14px;margin:8px 0 4px">
+          ✨ Nel pacchetto Standard scegliamo noi gli stili migliori per te. Vuoi sceglierli tu? Passa a <strong>Pro</strong> o <strong>Studio</strong>.
+        </div>
 
         <label>3 · Chi è il soggetto?</label>
         <select name="subjectClass">
@@ -109,6 +122,7 @@
   </div>
 
 <script>
+  function goHome(){ if(document.referrer){location.href=document.referrer;} else if(history.length>1){history.back();} else {location.href='/';} }
   const f=document.getElementById('f'),out=document.getElementById('out'),imgs=document.getElementById('imgs'),payBox=document.getElementById('pay');
   let orderId=null,timer=null,pkg='standard';
 
@@ -116,8 +130,13 @@
   const qs=new URLSearchParams(location.search);
   var qp=qs.get('package'); if(['standard','pro','studio'].indexOf(qp)>=0)pkg=qp;
   function paintPlans(){document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
-  document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
-  paintPlans();
+  function updateStyleVis(){
+    var std=(pkg==='standard');
+    document.getElementById('styleSection').style.display=std?'none':'block';
+    document.getElementById('standardNote').style.display=std?'block':'none';
+  }
+  document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();updateStyleVis();});
+  paintPlans();updateStyleVis();
 
   // stili selezionabili
   let selectedStyles=new Set();
