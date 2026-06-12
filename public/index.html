@@ -97,7 +97,8 @@
         <label>5 · Carica i tuoi selfie</label>
         <div class="drop">
           <input type="file" name="photos" accept="image/*" multiple required style="border:none;padding:0">
-          <div class="hint">6–10 foto della stessa persona · viso ben visibile · luci e angolazioni diverse · niente occhiali da sole o altre persone</div>
+          <div class="hint"><strong>8-16 foto</strong> della stessa persona: la maggior parte in <strong>primo piano (spalle in su)</strong>, alcune a <strong>mezzo busto</strong>, 2-4 a <strong>figura intera</strong>. Viso ben visibile e nitido, luci e giornate diverse, una sola persona, niente occhiali da sole. Puoi aggiungerle in più riprese: si sommano.</div>
+          <div id="photoCount" style="margin-top:8px;font-size:13.5px;font-weight:600"></div>
         </div>
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-weight:400;color:var(--ink)">
@@ -154,13 +155,31 @@
     });
   });
 
+  // Caricamento cumulativo dei selfie + contatore (evita che una nuova selezione sostituisca le precedenti)
+  var selectedFiles=[];
+  f.photos.addEventListener('change',function(e){
+    for(var i=0;i<e.target.files.length;i++){var file=e.target.files[i];
+      if(!selectedFiles.some(function(x){return x.name===file.name&&x.size===file.size;})) selectedFiles.push(file);
+    }
+    updatePhotoCount();
+  });
+  function updatePhotoCount(){
+    var n=selectedFiles.length, el=document.getElementById('photoCount');
+    if(!n){el.textContent='';return;}
+    el.textContent=(n<6?'⚠ ':'✓ ')+n+' foto selezionate'+(n<6?' — meglio almeno 6-8 per un buon risultato':'');
+    el.style.color=n<6?'#c8412c':'#19a07f';
+  }
+
   if(qs.get('order')){orderId=qs.get('order');show();poll(orderId);}
   if(qs.get('canceled'))msg('Pagamento annullato. Puoi riprovare quando vuoi.');
 
   f.addEventListener('submit',async e=>{
     e.preventDefault();
+    if(selectedFiles.length<4){msg('Carica almeno 4 foto (consigliate 6-10) per un buon risultato.');return;}
     msg('Creazione ordine in corso…');
     const fd=new FormData(f);fd.set('package',pkg);
+    fd.delete('photos');
+    selectedFiles.forEach(function(file){fd.append('photos',file);});
     selectedStyles.forEach(s=>fd.append('styles',s));
     try{
       const r=await fetch('/api/orders',{method:'POST',body:fd});

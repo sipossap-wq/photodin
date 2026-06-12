@@ -51,14 +51,14 @@ app.use('/', express.static(path.join(__dirname, 'public')));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 12 * 1024 * 1024, files: 15 },
+  limits: { fileSize: 12 * 1024 * 1024, files: 30 },
 });
 
 // ============================================================
 // 1. Crea ordine (stato: pending_payment). Salva le foto, NON
 //    chiama ancora Astria: la generazione parte dopo il pagamento.
 // ============================================================
-app.post('/api/orders', upload.array('photos', 15), (req, res) => {
+app.post('/api/orders', upload.array('photos', 30), (req, res) => {
   try {
     const customerEmail = (req.body.email || '').trim();
     const pkg = (req.body.package || 'standard').toLowerCase();
@@ -77,6 +77,7 @@ app.post('/api/orders', upload.array('photos', 15), (req, res) => {
     fs.mkdirSync(dir, { recursive: true });
     // Nome file solo per indice (evita path traversal)
     req.files.forEach((f, i) => fs.writeFileSync(path.join(dir, `${i}.jpg`), f.buffer));
+    console.log(`[${id}] foto ricevute dal browser: ${req.files.length}`);
 
     const db = load();
     db[id] = {
@@ -109,7 +110,7 @@ app.post('/api/orders', upload.array('photos', 15), (req, res) => {
 // 1bis. ANTEPRIMA GRATUITA — 1 foto via FaceID (niente addestramento, ~€0,10)
 //        Limite: 1 per email.
 // ============================================================
-app.post('/api/preview', upload.array('photos', 10), async (req, res) => {
+app.post('/api/preview', upload.array('photos', 30), async (req, res) => {
   try {
     const customerEmail = (req.body.email || '').trim();
     const subjectClass = (req.body.subjectClass || 'person').toLowerCase();
@@ -326,6 +327,7 @@ async function startGeneration(orderId) {
     buffer: fs.readFileSync(path.join(dir, fn)),
     originalname: fn,
   }));
+  console.log(`[${orderId}] foto lette da disco per Astria: ${files.length}`);
   const styles = buildPrompts(o.styles, o.package, o.subjectClass);
 
   // Tetto foto per i TEST (es. TEST_MAX_PHOTOS=10): genera poche foto per spendere poco.
@@ -339,7 +341,7 @@ async function startGeneration(orderId) {
   // Risoluzione per pacchetto:
   // standard = base (web) · pro = alta risoluzione + ritocco · studio = alta + ritocco (+ 4K, TODO da testare)
   const RES = {
-    standard: { superRes: false, faceCorrect: false },
+    standard: { superRes: false, faceCorrect: true },
     pro:      { superRes: true,  faceCorrect: true },
     studio:   { superRes: true,  faceCorrect: true },
   };

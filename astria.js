@@ -41,6 +41,7 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
   }
   if (callbackTune) form.append('tune[callback]', callbackTune);
 
+  console.log(`[astria] immagini inviate al tune: ${images.length}`);
   images.forEach((f) => {
     form.append('tune[images][]', f.buffer, f.originalname || 'photo.jpg');
   });
@@ -50,6 +51,9 @@ async function createTune({ title, name, images, callbackTune, prompts = [], bra
     form.append(`tune[prompts_attributes][${i}][num_images]`, String(p.num_images || 4));
     form.append(`tune[prompts_attributes][${i}][inpaint_faces]`, faceCorrect ? 'true' : 'false');
     form.append(`tune[prompts_attributes][${i}][super_resolution]`, superRes ? 'true' : 'false');
+    // Ritratto verticale 4:5 (raccomandato da Astria, evita artefatti tipo doppia testa)
+    form.append(`tune[prompts_attributes][${i}][w]`, '896');
+    form.append(`tune[prompts_attributes][${i}][h]`, '1152');
     if (p.callback) form.append(`tune[prompts_attributes][${i}][callback]`, p.callback);
   });
 
