@@ -36,17 +36,35 @@ const PACKAGE_PHOTOS = { standard: 30, pro: 100, studio: 120 };
  * Costruisce i prompt a partire dagli stili scelti dal cliente.
  * Le foto del pacchetto vengono distribuite sugli stili selezionati.
  */
-function buildPrompts(selectedIds, pkg = 'standard', cls = 'person') {
+// Max immagini per singolo prompt (per stare sotto eventuali limiti di Astria).
+const MAX_PER_PROMPT = 8;
+
+function buildPrompts(selectedIds, pkg = 'standard', cls = 'person', totalOverride) {
   let styles = (selectedIds || [])
     .map((id) => STYLE_CATALOG.find((s) => s.id === id))
     .filter(Boolean);
-  // se non sceglie nulla, usa una selezione predefinita
-  if (styles.length === 0) styles = STYLE_CATALOG.slice(0, pkg === 'standard' ? 4 : 6);
+  // Nessuna scelta stili: generiamo un set VARIO su tutti gli stili (figura intera solo Studio)
+  if (styles.length === 0) {
+    styles = STYLE_CATALOG.filter((s) => s.id !== 'fullbody');
+    if (pkg === 'studio') styles = STYLE_CATALOG.slice(); // include figura intera
+  }
 
-  const total = PACKAGE_PHOTOS[pkg] || PACKAGE_PHOTOS.standard;
-  const per = Math.max(1, Math.round(total / styles.length));
+  const total = totalOverride || PACKAGE_PHOTOS[pkg] || PACKAGE_PHOTOS.standard;
+  const perStyle = Math.max(1, Math.round(total / styles.length));
 
-  return styles.map((s) => ({ text: `ohwx ${cls}, ${s.text}`, num_images: per }));
+  // Spezza ogni stile in più prompt da max 8 immagini, così anche scegliendo
+  // un solo stile si ottiene il numero pieno di foto.
+  const prompts = [];
+  styles.forEach((s) => {
+    const text = `ohwx ${cls}, ${s.text}`;
+    let remaining = perStyle;
+    while (remaining > 0) {
+      const n = Math.min(MAX_PER_PROMPT, remaining);
+      prompts.push({ text, num_images: n });
+      remaining -= n;
+    }
+  });
+  return prompts;
 }
 
 module.exports = { STYLE_CATALOG, PACKAGE_PHOTOS, buildPrompts };
