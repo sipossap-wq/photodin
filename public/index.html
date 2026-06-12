@@ -75,26 +75,21 @@
           </div>
         </div>
 
-        <div id="styleSection">
-          <label>2 · Scegli gli stili</label>
-          <div id="styleGrid" class="plans" style="grid-template-columns:1fr 1fr;gap:10px"></div>
-          <div class="hint" style="margin-top:6px">Seleziona uno o più stili: le foto del pacchetto si distribuiscono tra quelli scelti.</div>
-        </div>
-        <div id="standardNote" class="hint" style="display:none;background:#eef4ff;border:1px solid #d7e6ff;border-radius:10px;padding:12px 14px;margin:8px 0 4px">
-          ✨ Nel pacchetto Standard scegliamo noi gli stili migliori per te. Vuoi sceglierli tu? Passa a <strong>Pro</strong> o <strong>Studio</strong>.
+        <div class="hint" style="background:#eef4ff;border:1px solid #d7e6ff;border-radius:10px;padding:12px 14px;margin:4px 0">
+          ✨ Pensiamo noi agli stili: riceverai un set <strong>vario</strong> di foto professionali (corporate, ufficio, studio, LinkedIn e altri), pronte per ogni esigenza.
         </div>
 
-        <label>3 · Chi è il soggetto?</label>
+        <label>2 · Chi è il soggetto?</label>
         <select name="subjectClass">
           <option value="man">Uomo</option>
           <option value="woman">Donna</option>
           <option value="person">Preferisco non specificare</option>
         </select>
 
-        <label>4 · La tua email (per inviarti le foto)</label>
+        <label>3 · La tua email (per inviarti le foto)</label>
         <input type="email" name="email" required placeholder="tu@email.it">
 
-        <label>5 · Carica i tuoi selfie</label>
+        <label>4 · Carica i tuoi selfie</label>
         <div class="drop">
           <input type="file" name="photos" accept="image/*" multiple required style="border:none;padding:0">
           <div class="hint"><strong>8-16 foto</strong> della stessa persona: la maggior parte in <strong>primo piano (spalle in su)</strong>, alcune a <strong>mezzo busto</strong>, 2-4 a <strong>figura intera</strong>. Viso ben visibile e nitido, luci e giornate diverse, una sola persona, niente occhiali da sole. Puoi aggiungerle in più riprese: si sommano.</div>
@@ -131,29 +126,8 @@
   const qs=new URLSearchParams(location.search);
   var qp=qs.get('package'); if(['standard','pro','studio'].indexOf(qp)>=0)pkg=qp;
   function paintPlans(){document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
-  function updateStyleVis(){
-    var std=(pkg==='standard');
-    document.getElementById('styleSection').style.display=std?'none':'block';
-    document.getElementById('standardNote').style.display=std?'block':'none';
-  }
-  document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();updateStyleVis();});
-  paintPlans();updateStyleVis();
-
-  // stili selezionabili
-  let selectedStyles=new Set();
-  fetch('/api/styles').then(r=>r.json()).then(list=>{
-    const g=document.getElementById('styleGrid');
-    g.innerHTML=list.map(s=>'<div class="plan" data-style="'+s.id+'"><div class="nm">'+s.label+'</div><div class="ds">'+s.desc+'</div></div>').join('');
-    list.slice(0,4).forEach(s=>selectedStyles.add(s.id));
-    g.querySelectorAll('[data-style]').forEach(el=>{
-      if(selectedStyles.has(el.dataset.style))el.classList.add('sel');
-      el.onclick=()=>{
-        const id=el.dataset.style;
-        if(selectedStyles.has(id)){selectedStyles.delete(id);el.classList.remove('sel');}
-        else{selectedStyles.add(id);el.classList.add('sel');}
-      };
-    });
-  });
+  document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
+  paintPlans();
 
   // Caricamento cumulativo dei selfie + contatore (evita che una nuova selezione sostituisca le precedenti)
   var selectedFiles=[];
@@ -180,7 +154,6 @@
     const fd=new FormData(f);fd.set('package',pkg);
     fd.delete('photos');
     selectedFiles.forEach(function(file){fd.append('photos',file);});
-    selectedStyles.forEach(s=>fd.append('styles',s));
     try{
       const r=await fetch('/api/orders',{method:'POST',body:fd});
       const d=await r.json();
