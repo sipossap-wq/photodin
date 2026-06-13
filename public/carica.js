@@ -25,23 +25,34 @@ function updateCount(){
   el.style.color=n<6?'#c8412c':'#19a07f';
 }
 
-// Verifica lo stato all'apertura: se l'ordine è già in lavorazione → vai alla consegna.
-(async function check(){
+// All'apertura aspettiamo la conferma del pagamento (il webhook di Stripe può
+// tardare qualche secondo, soprattutto se il server "dormiva"). Finché non è
+// 'paid' teniamo disabilitato l'invio e mostriamo "confermo pagamento…".
+send.disabled=true;
+(async function waitPaid(tries){
   if(!orderId||!token) return;
+  tries=tries||0;
   try{
     const r=await fetch('/api/orders/'+orderId+'?t='+encodeURIComponent(token));
     if(r.status===403){msg('Link non valido o scaduto.');send.disabled=true;return;}
     const o=await r.json();
     if(['training','generating','completed'].indexOf(o.status)>=0){
-      location.href='/grazie.html?order='+orderId+'&t='+encodeURIComponent(token);
+      location.href='/grazie.html?order='+orderId+'&t='+encodeURIComponent(token); return;
     }
-  }catch(e){/* ignora: si può comunque tentare l'upload */}
+    if(o.status==='paid'){ send.disabled=false; msg('Pagamento confermato ✅ Ora carica le tue foto.'); return; }
+    // ancora 'awaiting_payment': il pagamento non è ancora confermato
+    if(tries<40){ msg('Confermo il pagamento… un attimo.'); setTimeout(function(){waitPaid(tries+1);},3000); }
+    else { msg('Non riesco a confermare il pagamento. Se hai pagato, ricarica la pagina tra poco.'); }
+  }catch(e){ if(tries<40) setTimeout(function(){waitPaid(tries+1);},3000); }
 })();
 
 send.addEventListener('click',async function(){
+  if(!document.getElementById('consent').checked){msg('Devi accettare il consenso e i termini per continuare.');return;}
   if(selectedFiles.length<6){msg('Carica almeno 6 foto (consigliate 8-16, varie per sfondo e luce).');return;}
   send.disabled=true; msg('Caricamento in corso…');
   const fd=new FormData();
+  fd.append('consent','true');
+  fd.append('subjectClass',document.getElementById('subjectClass').value);
   selectedFiles.forEach(function(file){fd.append('photos',file);});
   try{
     const r=await fetch('/api/orders/'+orderId+'/photos?t='+encodeURIComponent(token),{method:'POST',body:fd});

@@ -1,60 +1,52 @@
-// app.js — pagina d'ordine photodin (flusso PAY-FIRST).
-// Step 1: pacchetto + email + consenso → crea ordine → paga (Stripe).
-// Le foto si caricano DOPO il pagamento, su carica.html.
+// app.js — home photodin (flusso PAY-FIRST, "clic sull'offerta → Stripe").
+// Scegli un pacchetto → si crea l'ordine → si apre subito Stripe col riepilogo.
+// Email la chiede Stripe; consenso e foto si raccolgono dopo, su carica.html.
 function goHome(){ if(document.referrer){location.href=document.referrer;} else if(history.length>1){history.back();} else {location.href='/';} }
-const f=document.getElementById('f'),out=document.getElementById('out'),payBox=document.getElementById('pay');
-let orderId=null,orderToken=null,pkg='standard';
+const out=document.getElementById('out');
+function show(){out.style.display='block';}
+function msg(t){show();out.textContent=t;}
 
 var navBack=document.getElementById('navBack'); if(navBack)navBack.addEventListener('click',goHome);
 var navBrand=document.getElementById('navBrand'); if(navBrand)navBrand.addEventListener('click',goHome);
 
-// pacchetto: da URL (?package=standard|pro|studio) o default standard
-const qs=new URLSearchParams(location.search);
-var qp=qs.get('package'); if(['standard','pro','studio'].indexOf(qp)>=0)pkg=qp;
-function paintPlans(){document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
-document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
-paintPlans();
+if(new URLSearchParams(location.search).get('canceled'))msg('Pagamento annullato. Puoi riprovare quando vuoi.');
 
-if(qs.get('canceled'))msg('Pagamento annullato. Puoi riprovare quando vuoi.');
+const buttons=document.querySelectorAll('.buy');
+buttons.forEach(function(b){ b.addEventListener('click', function(){ buy(b.dataset.pkg, b); }); });
 
-f.addEventListener('submit',async e=>{
-  e.preventDefault();
-  const email=(f.email.value||'').trim();
-  const consent=f.consent.checked;
-  if(!email){msg('Inserisci la tua email.');return;}
-  if(!consent){msg('Devi accettare il consenso e i termini per continuare.');return;}
-  msg('Creazione ordine in corso…');
+async function buy(pkg, btn){
+  buttons.forEach(function(b){ b.disabled=true; });
+  msg('Preparazione del pagamento sicuro…');
   try{
     const r=await fetch('/api/orders',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email,package:pkg,subjectClass:f.subjectClass.value,consent:true}),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({package:pkg}),
     });
     const d=await r.json();
-    if(!r.ok){msg('Ops: '+(d.error||r.status));return;}
-    orderId=d.orderId;orderToken=d.token;
-    msg('Ordine creato · €'+d.amount+'. Procedi al pagamento qui sotto.');
-    payBox.style.display='block';
-    document.getElementById('payStripe').style.display=d.methods.stripe?'flex':'none';
-    document.getElementById('payDev').style.display=d.devPay?'flex':'none';
-    payBox.scrollIntoView({behavior:'smooth'});
-  }catch(err){msg('Errore di rete: '+err.message+'. Riprova tra un attimo.');}
-});
+    if(!r.ok)throw new Error(d.error||String(r.status));
+    const token=encodeURIComponent(d.token||'');
 
-document.getElementById('payStripe').onclick=()=>goPay('stripe');
-document.getElementById('payDev').onclick=async()=>{
-  msg('Simulazione pagamento…');
-  const r=await fetch('/api/orders/'+orderId+'/dev-pay?t='+encodeURIComponent(orderToken||''),{method:'POST'});
-  const d=await r.json();
-  if(d.ok){location.href='/carica.html?order='+orderId+'&t='+encodeURIComponent(orderToken||'');}
-  else msg('Errore: '+(d.error||'pagamento non riuscito'));
-};
-async function goPay(m){
-  msg('Apertura pagamento…');
-  const r=await fetch('/api/orders/'+orderId+'/checkout/'+m+'?t='+encodeURIComponent(orderToken||''),{method:'POST'});
-  const d=await r.json();
-  if(d.url)location.href=d.url;else msg('Errore: '+(d.error||'pagamento non disponibile'));
+    // Caso normale: vai dritto alla pagina di pagamento Stripe (col riepilogo).
+    if(d.methods.stripe){
+      const checkout=await fetch('/api/orders/'+d.orderId+'/checkout/stripe?t='+token,{method:'POST'});
+      const payment=await checkout.json();
+      if(!checkout.ok||!payment.url)throw new Error(payment.error||'pagamento non disponibile');
+      location.href=payment.url;
+      return;
+    }
+
+    // Solo in prova (Stripe non configurato): salta il pagamento e vai al caricamento.
+    if(d.devPay){
+      const dev=await fetch('/api/orders/'+d.orderId+'/dev-pay?t='+token,{method:'POST'});
+      const result=await dev.json();
+      if(!dev.ok||!result.ok)throw new Error(result.error||'avvio prova non disponibile');
+      location.href='/carica.html?order='+d.orderId+'&t='+token;
+      return;
+    }
+
+    throw new Error('pagamento non disponibile');
+  }catch(err){
+    msg('Ops: '+err.message+'. Riprova tra un attimo.');
+    buttons.forEach(function(b){ b.disabled=false; });
+  }
 }
-
-function show(){out.style.display='block';}
-function msg(t){show();out.textContent=t;}

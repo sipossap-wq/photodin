@@ -21,7 +21,7 @@ if (process.env.STRIPE_SECRET_KEY) {
 
 async function createStripeCheckout(order, baseUrl) {
   if (!stripe) throw new Error('STRIPE_SECRET_KEY non configurata');
-  return stripe.checkout.sessions.create({
+  const params = {
     mode: 'payment',
     // Nessun payment_method_types esplicito: Stripe mostra automaticamente
     // i metodi attivi nel dashboard (carte, Apple Pay, Google Pay, Klarna...).
@@ -34,12 +34,14 @@ async function createStripeCheckout(order, baseUrl) {
       quantity: 1,
     }],
     metadata: { orderId: order.id },
-    customer_email: order.email,
     // Dopo il pagamento il cliente carica le foto: redirect alla pagina di
     // caricamento (col token, che autorizza l'upload del SOLO suo ordine).
     success_url: `${baseUrl}/carica.html?order=${order.id}&t=${encodeURIComponent(order.token || '')}`,
     cancel_url: `${baseUrl}/?canceled=1`,
-  });
+  };
+  // Se conosciamo l'email la passiamo (prefill); altrimenti la raccoglie Stripe.
+  if (order.email) params.customer_email = order.email;
+  return stripe.checkout.sessions.create(params);
 }
 
 function verifyStripeWebhook(rawBody, signature) {

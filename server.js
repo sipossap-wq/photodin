@@ -202,6 +202,12 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
         alertAdmin(`Pagamento sospetto: ${orderId}`,
           `Importo/valuta non corrispondenti.\nAtteso: ${expected} eur (${o.package}).\nRicevuto: ${session.amount_total} ${session.currency}.\nGenerazione NON avviata.`);
       } else {
+        // Email raccolta da Stripe in checkout → la salviamo per la consegna.
+        const stripeEmail = session.customer_details?.email || session.customer_email || '';
+        if (stripeEmail) {
+          const db = load();
+          if (db[orderId] && !db[orderId].email) { db[orderId].email = stripeEmail; save(db); }
+        }
         // Pagamento valido → marca 'paid'. La generazione partirà quando il
         // cliente carica le foto sulla pagina di caricamento.
         markPaid(orderId, 'stripe');
@@ -269,32 +275,22 @@ const SUBJECT_CLASSES = ['man', 'woman', 'person'];
 // ============================================================
 app.post('/api/orders', ordersLimiter, (req, res) => {
   try {
-    const customerEmail = (req.body.email || '').trim();
     const pkg = (req.body.package || 'standard').toLowerCase();
-    let subjectClass = (req.body.subjectClass || 'person').toLowerCase();
-    if (!SUBJECT_CLASSES.includes(subjectClass)) subjectClass = 'person';
-    const consent = req.body.consent === 'true' || req.body.consent === 'on' || req.body.consent === true;
-    let styles = req.body.styles || [];
-    if (typeof styles === 'string') styles = [styles];
-
-    if (!customerEmail) return res.status(400).json({ error: 'Email mancante.' });
-    if (!EMAIL_RE.test(customerEmail) || customerEmail.length > 254)
-      return res.status(400).json({ error: 'Email non valida.' });
-    if (!consent) return res.status(400).json({ error: 'Devi accettare il consenso e i termini per continuare.' });
     if (!pay.PRICES[pkg]) return res.status(400).json({ error: 'Pacchetto non valido.' });
 
+    // Email e consenso NON sono richiesti qui: l'email la raccoglie Stripe in
+    // checkout, consenso e tipo soggetto si raccolgono in fase di caricamento
+    // (subito prima delle foto). Così il clic sull'offerta va dritto a Stripe.
     const id = newId();
-    // Token segreto per-ordine: serve al cliente per pagare, caricare le foto e
-    // consultare il PROPRIO ordine. 32 byte base64url.
-    const token = crypto.randomBytes(24).toString('base64url');
+    const token = crypto.randomBytes(24).toString('base64url'); // segreto per-ordine
 
     const db = load();
     db[id] = {
-      id, token, email: customerEmail, package: pkg, subjectClass, styles,
+      id, token, email: '', package: pkg, subjectClass: 'person', styles: [],
       status: 'awaiting_payment',
       priceCents: pay.priceCents(pkg),
       createdAt: new Date().toISOString(),
-      consent: true, consentAt: new Date().toISOString(),
+      consent: false, consentAt: null,
       photoCount: 0,
       tuneId: null, eta: null,
       images: [], promptsTotal: 0, promptsDone: 0,
@@ -332,6 +328,12 @@ app.post('/api/orders/:id/photos', ordersLimiter, uploadPhotos, async (req, res)
     // niente re-upload, ci pensa il watchdog a riprovare la generazione.
     if (o.photoCount > 0) { rmTemp(req.files); return res.status(409).json({ error: 'Foto già caricate, generazione in corso.' }); }
 
+    // Consenso + tipo soggetto raccolti QUI (subito prima dei dati biometrici).
+    const consent = req.body.consent === 'true' || req.body.consent === 'on' || req.body.consent === true;
+    if (!consent) { rmTemp(req.files); return res.status(400).json({ error: 'Devi accettare il consenso e i termini per continuare.' }); }
+    let subjectClass = (req.body.subjectClass || 'person').toLowerCase();
+    if (!SUBJECT_CLASSES.includes(subjectClass)) subjectClass = 'person';
+
     if (!req.files || req.files.length < 6) {
       rmTemp(req.files); return res.status(400).json({ error: 'Carica almeno 6 foto (consigliate 8-16, varie per sfondo e luce).' });
     }
@@ -364,6 +366,9 @@ app.post('/api/orders/:id/photos', ordersLimiter, uploadPhotos, async (req, res)
     const db = load();
     if (!db[id] || db[id].status !== 'paid') return res.status(409).json({ error: 'Ordine già avviato.' });
     db[id].photoCount = req.files.length;
+    db[id].subjectClass = subjectClass;
+    db[id].consent = true;
+    db[id].consentAt = new Date().toISOString();
     db[id].status = 'training';
     save(db);
     console.log(`[${id}] foto caricate dopo pagamento: ${req.files.length} — avvio generazione`);
