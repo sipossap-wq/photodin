@@ -44,14 +44,14 @@
 </head>
 <body>
   <div class="top"><div class="in">
-    <a class="back" onclick="goHome()" aria-label="Indietro" title="Torna alla home">←</a>
-    <a class="brand" onclick="goHome()"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>Photodin</a>
+    <a class="back" id="navBack" aria-label="Indietro" title="Torna alla home" style="cursor:pointer">←</a>
+    <a class="brand" id="navBrand"><span class="dot"><svg viewBox="0 0 24 24"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zM9 2l-1.8 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.2L15 2H9z"/></svg></span>Photodin</a>
     <span class="spacer"></span>
   </div></div>
 
   <div class="wrap">
     <h1>Crea le tue foto professionali</h1>
-    <p class="sub">Carica i tuoi scatti, scegli il pacchetto e ricevi i tuoi ritratti in circa un'ora.</p>
+    <p class="sub">Scegli il pacchetto e paga: subito dopo carichi le tue foto e ricevi i ritratti in circa un'ora.</p>
 
     <form id="f">
       <div class="card">
@@ -88,12 +88,7 @@
         <label>3 · La tua email (per inviarti le foto)</label>
         <input type="email" name="email" required placeholder="tu@email.it">
 
-        <label>4 · Carica i tuoi selfie</label>
-        <div class="drop">
-          <input type="file" name="photos" accept="image/*" multiple required style="border:none;padding:0">
-          <div class="hint"><strong>8-16 foto</strong> della stessa persona: la maggior parte in <strong>primo piano (spalle in su)</strong>, alcune a <strong>mezzo busto</strong>, 2-4 a <strong>figura intera</strong>. Viso ben visibile e nitido, luci e giornate diverse, una sola persona, niente occhiali da sole. Puoi aggiungerle in più riprese: si sommano.</div>
-          <div id="photoCount" style="margin-top:8px;font-size:13.5px;font-weight:600"></div>
-        </div>
+        <div class="hint" style="margin-top:14px">📸 Dopo il pagamento ti chiederemo di caricare le tue foto (8-16 selfie della stessa persona).</div>
 
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-weight:400;color:var(--ink)">
           <input type="checkbox" name="consent" required style="width:auto;margin-top:4px">
@@ -112,86 +107,8 @@
     </div>
 
     <div id="out" class="box" style="display:none"></div>
-    <div id="imgs" class="grid"></div>
   </div>
 
-<script>
-  function goHome(){ if(document.referrer){location.href=document.referrer;} else if(history.length>1){history.back();} else {location.href='/';} }
-  const f=document.getElementById('f'),out=document.getElementById('out'),imgs=document.getElementById('imgs'),payBox=document.getElementById('pay');
-  let orderId=null,timer=null,pkg='standard';
-
-  // pacchetto: da URL (?package=standard|pro|studio) o default standard
-  const qs=new URLSearchParams(location.search);
-  var qp=qs.get('package'); if(['standard','pro','studio'].indexOf(qp)>=0)pkg=qp;
-  function paintPlans(){document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.classList.toggle('sel',p.dataset.pkg===pkg));}
-  document.querySelectorAll('.plan[data-pkg]').forEach(p=>p.onclick=()=>{pkg=p.dataset.pkg;paintPlans();});
-  paintPlans();
-
-  // Caricamento cumulativo dei selfie + contatore (evita che una nuova selezione sostituisca le precedenti)
-  var selectedFiles=[];
-  f.photos.addEventListener('change',function(e){
-    for(var i=0;i<e.target.files.length;i++){var file=e.target.files[i];
-      if(!selectedFiles.some(function(x){return x.name===file.name&&x.size===file.size;})) selectedFiles.push(file);
-    }
-    updatePhotoCount();
-  });
-  function updatePhotoCount(){
-    var n=selectedFiles.length, el=document.getElementById('photoCount');
-    if(!n){el.textContent='';return;}
-    el.textContent=(n<6?'⚠ ':'✓ ')+n+' foto selezionate'+(n<6?' — meglio almeno 6-8 per un buon risultato':'');
-    el.style.color=n<6?'#c8412c':'#19a07f';
-  }
-
-  if(qs.get('order')){orderId=qs.get('order');show();poll(orderId);}
-  if(qs.get('canceled'))msg('Pagamento annullato. Puoi riprovare quando vuoi.');
-
-  f.addEventListener('submit',async e=>{
-    e.preventDefault();
-    if(selectedFiles.length<6){msg('Carica almeno 6 foto (consigliate 8-16, varie per sfondo e luce) per un buon risultato.');return;}
-    msg('Creazione ordine in corso…');
-    const fd=new FormData(f);fd.set('package',pkg);
-    fd.delete('photos');
-    selectedFiles.forEach(function(file){fd.append('photos',file);});
-    try{
-      const r=await fetch('/api/orders',{method:'POST',body:fd});
-      const d=await r.json();
-      if(!r.ok){msg('Ops: '+(d.error||r.status));return;}
-      orderId=d.orderId;
-      msg('Ordine creato · €'+d.amount+'. Scegli come pagare qui sopra.');
-      payBox.style.display='block';
-      document.getElementById('payStripe').style.display=d.methods.stripe?'flex':'none';
-      document.getElementById('payDev').style.display=d.devPay?'flex':'none';
-      payBox.scrollIntoView({behavior:'smooth'});
-    }catch(err){msg('Errore di rete: '+err.message+'. Riprova tra un attimo.');}
-  });
-
-  document.getElementById('payStripe').onclick=()=>goPay('stripe');
-  document.getElementById('payDev').onclick=async()=>{
-    msg('Avvio creazione foto…');
-    const r=await fetch('/api/orders/'+orderId+'/dev-pay',{method:'POST'});
-    const d=await r.json();
-    if(d.ok){payBox.style.display='none';poll(orderId);}else msg('Errore: '+(d.error||'avvio fallito'));
-  };
-  async function goPay(m){
-    msg('Apertura pagamento…');
-    const r=await fetch('/api/orders/'+orderId+'/checkout/'+m,{method:'POST'});
-    const d=await r.json();
-    if(d.url)location.href=d.url;else msg('Errore: '+(d.error||'pagamento non disponibile'));
-  }
-
-  function show(){out.style.display='block';}
-  function msg(t){show();out.textContent=t;}
-  function poll(id){
-    clearInterval(timer);
-    const labels={paid:'Pagamento ricevuto, preparazione…',training:'Sto imparando il tuo volto…',generating:'Sto creando le tue foto…',completed:'Completato!'};
-    timer=setInterval(async()=>{
-      const r=await fetch('/api/orders/'+id);const o=await r.json();
-      if(o.error)return;
-      msg((labels[o.status]||o.status)+'  ·  foto pronte: '+o.images.length+'  ('+o.progress+')');
-      imgs.innerHTML=o.images.map(u=>'<img src="'+u+'">').join('');
-      if(o.status==='completed'){clearInterval(timer);out.textContent='✅ Le tue foto sono pronte! Clicca col destro per salvarle.';}
-    },8000);
-  }
-</script>
+<script src="/app.js"></script>
 </body>
 </html>

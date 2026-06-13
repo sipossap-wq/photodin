@@ -17,9 +17,6 @@ const FILM_GRAIN = (process.env.ASTRIA_FILM_GRAIN || '1') === '1';
 const COLOR_GRADING = process.env.ASTRIA_COLOR_GRADING || 'Film Portra';
 // NOTA: Flux NON supporta i negative prompt (docs Astria: "Flux doesn't work
 // with negatives"). Il realismo va espresso in POSITIVO nei prompt (styles.js).
-// ASTRIA_NEG resta usato solo per l'anteprima FaceID su base SD1.5.
-const NEG_PROMPT = process.env.ASTRIA_NEG ||
-  'plastic skin, waxy skin, airbrushed, oversmoothed, blurry skin, cgi, 3d render, doll-like, artificial';
 // Step di diffusione (opzionale: 28-36 consigliati). Vuoto = default Astria.
 const STEPS = process.env.ASTRIA_STEPS || '';
 // face_swap: usa le foto di training per aumentare la somiglianza del volto.
@@ -144,71 +141,7 @@ async function deleteTune(tuneId) {
   await axios.delete(`${API}/tunes/${tuneId}`, { headers: authHeaders() });
 }
 
-// === PACKS: set di prompt/parametri curati dal team Astria ===
-// Un pack (es. 260 = "Corporate Headshots", quello di astria.ai/p/corporate-headshots)
-// addestra il modello E genera l'intero set di foto progettato da Astria:
-// stesso identico risultato della loro pagina, senza prompt hard-coded da noi.
-/**
- * Crea un tune da un pack: training + generazione automatica del set del pack.
- * @param {Object} opts {packId, title, name ('man'|'woman'), images,
- *                       callbackTune, promptCallback}
- */
-async function createPackTune({ packId, title, name, images, callbackTune, promptCallback }) {
-  const form = new FormData();
-  form.append('tune[title]', title);
-  form.append('tune[name]', name);
-  form.append('tune[preset]', process.env.ASTRIA_PRESET || 'flux-lora-portrait');
-  if (callbackTune) form.append('tune[callback]', callbackTune);
-  if (promptCallback) form.append('tune[prompt_attributes][callback]', promptCallback);
-  images.forEach((f) => form.append('tune[images][]', f.buffer, f.originalname || 'photo.jpg'));
-  const { data } = await axios.post(`${API}/p/${packId}/tunes`, form, {
-    headers: { ...authHeaders(), ...form.getHeaders() },
-    maxBodyLength: Infinity, maxContentLength: Infinity,
-  });
-  return data;
-}
-
-// === FaceID: genera una foto SENZA addestramento (per l'anteprima gratuita) ===
-// Modello base SD economico per le anteprime (Realistic Vision v5.1).
-const FACEID_BASE_TUNE_ID = process.env.ASTRIA_FACEID_BASE_ID || '690204';
-
-/** Crea un "tune" FaceID: pronto all'istante, nessun addestramento. */
-async function createFaceIdTune({ title, name, images }) {
-  const form = new FormData();
-  form.append('tune[title]', title);
-  form.append('tune[name]', name);
-  form.append('tune[model_type]', 'faceid');
-  form.append('tune[base_tune_id]', FACEID_BASE_TUNE_ID);
-  images.forEach((f) => form.append('tune[images][]', f.buffer, f.originalname || 'photo.jpg'));
-  const { data } = await axios.post(`${API}/tunes`, form, {
-    headers: { ...authHeaders(), ...form.getHeaders() },
-    maxBodyLength: Infinity, maxContentLength: Infinity,
-  });
-  return Array.isArray(data) ? data[0] : data; // la risposta FaceID è un array
-}
-
-/** Genera 1 immagine con l'adapter FaceID, sul modello base. */
-async function createFaceIdPrompt(faceTuneId, { text, callback }) {
-  const form = new FormData();
-  form.append('prompt[text]', `<faceid:${faceTuneId}:1> ${text}`);
-  // Raccomandati dai docs FaceID per realismo e somiglianza:
-  form.append('prompt[face_correct]', 'true');
-  form.append('prompt[face_swap]', 'true');
-  form.append('prompt[super_resolution]', 'true');
-  form.append('prompt[w]', '512');
-  form.append('prompt[h]', '640');
-  // Sul base SD1.5 il negative prompt FUNZIONA (a differenza di Flux):
-  if (NEG_PROMPT) form.append('prompt[negative_prompt]', NEG_PROMPT);
-  form.append('prompt[num_images]', '1');
-  if (callback) form.append('prompt[callback]', callback);
-  const { data } = await axios.post(`${API}/tunes/${FACEID_BASE_TUNE_ID}/prompts`, form, {
-    headers: { ...authHeaders(), ...form.getHeaders() },
-  });
-  return data;
-}
-
 module.exports = {
   createTune, createPrompt, getTune, listPrompts, deleteTune,
-  createPackTune, createFaceIdTune, createFaceIdPrompt,
-  BASE_TUNE_ID, FACEID_BASE_TUNE_ID,
+  BASE_TUNE_ID,
 };

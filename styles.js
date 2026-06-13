@@ -11,7 +11,7 @@
 // - UNA formula di luce coerente per stile + atmosfera
 // - niente pronomi (he/she): il testo vale per man/woman/person
 // - coda tecnica breve per la pelle (anti effetto plastica)
-const SKIN = 'Natural skin texture with a matte finish, visible pores and fine lines, sharp focus on the eyes, shot with an 85mm portrait lens at a wide aperture, shallow depth of field, subtle film grain.';
+const SKIN = 'Neatly groomed, tidy hair and well-kept appearance. Natural skin texture with a matte finish, visible pores and fine lines, sharp focus on the eyes, shot with an 85mm portrait lens at a wide aperture, shallow depth of field, subtle film grain.';
 
 const STYLE_CATALOG = [
   { id: 'corporate',  label: 'Corporate',       desc: 'Abito scuro, fondale grigio, luce da studio',
@@ -70,21 +70,27 @@ function buildPrompts(selectedIds, pkg = 'standard', cls = 'person', totalOverri
   }
 
   const total = totalOverride || PACKAGE_PHOTOS[pkg] || PACKAGE_PHOTOS.standard;
-  const perStyle = Math.max(1, Math.round(total / styles.length));
+  // Distribuzione ESATTA: base foto per stile + 1 ai primi `rem` stili, così la
+  // somma dei num_images è SEMPRE === total (il cliente riceve il numero pagato),
+  // qualunque sia il numero di stili scelti. (round() distribuiva male e poteva
+  // consegnare 98-99 foto su 100.)
+  const n = styles.length;
+  const base = Math.floor(total / n);
+  const rem = total % n;
 
   // Spezza ogni stile in più prompt da max 8 immagini, così anche scegliendo
   // un solo stile si ottiene il numero pieno di foto.
   const prompts = [];
   styles.forEach((s, si) => {
-    let remaining = perStyle;
+    let count = base + (si < rem ? 1 : 0);
     let batch = 0;
-    while (remaining > 0) {
-      const n = Math.min(MAX_PER_PROMPT, remaining);
+    while (count > 0) {
+      const num = Math.min(MAX_PER_PROMPT, count);
       // offset per stile: anche con un solo batch per stile le pose variano nel set
       const pose = POSE_VARIANTS[(si + batch) % POSE_VARIANTS.length];
       // Il token va all'INIZIO del prompt (raccomandazione Astria per Flux).
-      prompts.push({ text: `ohwx ${cls}, ${s.text} ${pose}`, num_images: n });
-      remaining -= n;
+      prompts.push({ text: `ohwx ${cls}, ${s.text} ${pose}`, num_images: num });
+      count -= num;
       batch += 1;
     }
   });

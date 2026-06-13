@@ -35,7 +35,9 @@ async function createStripeCheckout(order, baseUrl) {
     }],
     metadata: { orderId: order.id },
     customer_email: order.email,
-    success_url: `${baseUrl}/grazie.html?order=${order.id}`,
+    // Dopo il pagamento il cliente carica le foto: redirect alla pagina di
+    // caricamento (col token, che autorizza l'upload del SOLO suo ordine).
+    success_url: `${baseUrl}/carica.html?order=${order.id}&t=${encodeURIComponent(order.token || '')}`,
     cancel_url: `${baseUrl}/?canceled=1`,
   });
 }
@@ -45,8 +47,14 @@ function verifyStripeWebhook(rawBody, signature) {
   return stripe.webhooks.constructEvent(rawBody, signature, process.env.STRIPE_WEBHOOK_SECRET);
 }
 
+// Recupera una sessione di checkout esistente (per riusarla ed evitare doppi addebiti).
+async function getStripeSession(sessionId) {
+  if (!stripe) throw new Error('STRIPE_SECRET_KEY non configurata');
+  return stripe.checkout.sessions.retrieve(sessionId);
+}
+
 module.exports = {
   PRICES, priceCents, label,
   stripeEnabled: () => !!stripe,
-  createStripeCheckout, verifyStripeWebhook,
+  createStripeCheckout, verifyStripeWebhook, getStripeSession,
 };

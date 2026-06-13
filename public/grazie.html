@@ -20,20 +20,6 @@
   <div class="box" id="status"><span class="dot"></span>Avvio in corso…</div>
   <div class="grid" id="imgs"></div>
 
-<script>
-  const id = new URLSearchParams(location.search).get('order');
-  const status = document.getElementById('status');
-  const imgs = document.getElementById('imgs');
-  if (!id) status.textContent = 'Ordine non specificato.';
-  else setInterval(async () => {
-    const r = await fetch('/api/orders/' + id);
-    const o = await r.json();
-    if (o.error) { status.textContent = o.error; return; }
-    const labels = { paid:'Pagato, preparazione…', training:'Addestramento del modello…', generating:'Generazione foto…', completed:'Completato!' };
-    status.innerHTML = (o.status==='completed'?'✅ ':'<span class="dot"></span>') +
-      (labels[o.status] || o.status) + '  ·  foto pronte: ' + o.images.length + ' (' + o.progress + ')';
-    imgs.innerHTML = o.images.map(u => '<img src="' + u + '">').join('');
-  }, 8000);
-</script>
+<script src="/grazie.js"></script>
 </body>
 </html>

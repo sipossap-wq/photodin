@@ -1,0 +1,44 @@
+# Render Blueprint per photodin.
+# Disco persistente OBBLIGATORIO: senza, ordini e foto si azzerano a ogni deploy.
+# (Il disco richiede un piano a pagamento, non il free.)
+services:
+  - type: web
+    name: photodin
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    disk:
+      name: photodin-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: TRUST_PROXY
+        value: "1"
+      # FASE A: "1" = immagini mock (gratis) per provare la pipeline.
+      # FASE B: metti "0" per la generazione reale (spende credito Astria).
+      - key: ASTRIA_TEST_MODE
+        value: "1"
+      # Render genera un segreto casuale per i callback Astria.
+      - key: CALLBACK_SECRET
+        generateValue: true
+      # Questi vanno impostati nel dashboard (Environment), NON nel repo:
+      - key: PUBLIC_BASE_URL      # es. https://photodin.onrender.com (dopo il 1° deploy)
+        sync: false
+      - key: ASTRIA_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
